@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create World Component</title>
+    <script>
+        function updateForm() {
+            var componentType = document.getElementById("component-type").value;
+            var formSection = document.getElementById("form-section");
+            
+            // Clear existing form content
+            formSection.innerHTML = "";
+
+            // Populate form based on component type
+            if (componentType === "Character") {
+                formSection.innerHTML += '<label for="name">Character Name:</label>';
+                formSection.innerHTML += '<input type="text" id="name" name="name" required><br>';
+                formSection.innerHTML += '<label for="description">Description:</label>';
+                formSection.innerHTML += '<textarea id="description" name="description"></textarea><br>';
+                
+                // Add Skill Input with Skill Values
+                formSection.innerHTML += '<label for="skills">Add Skills:</label>';
+                formSection.innerHTML += '<div id="skills-container">';
+                addSkillInput();  // Initialize with one skill input
+                formSection.innerHTML += '</div>';
+                formSection.innerHTML += '<button type="button" onclick="addSkillInput()">Add Another Skill</button><br>';
+                
+                // Add Location Input
+                formSection.innerHTML += '<label for="location">Location:</label>';
+                formSection.innerHTML += '<input type="text" id="location-input" name="location-input" placeholder="Type to add new or select existing"><br>';
+                
+                // Add Clan Input
+                formSection.innerHTML += '<label for="clan">Clan:</label>';
+                formSection.innerHTML += '<input type="text" id="clan-input" name="clan-input" placeholder="Type to add new or select existing"><br>';
+                
+                // Add Inanimate Input with Multiple Entries
+                formSection.innerHTML += '<label for="inanimates">Add Inanimates:</label>';
+                formSection.innerHTML += '<div id="inanimates-container">';
+                formSection.innerHTML += '<input type="text" name="inanimates" class="inanimates-input" placeholder="Type to add new or select existing"><br>';
+                formSection.innerHTML += '</div>';
+                formSection.innerHTML += '<button type="button" onclick="addInanimateInput()">Add Another Inanimate</button><br>';
+            }
+            else if (componentType === "Location") {
+                formSection.innerHTML += '<label for="name">Location Name:</label>';
+                formSection.innerHTML += '<input type="text" id="name" name="name" required><br>';
+                formSection.innerHTML += '<label for="description">Description:</label>';
+                formSection.innerHTML += '<textarea id="description" name="description"></textarea><br>';
+                formSection.innerHTML += '<label for="climate">Climate:</label>';
+                formSection.innerHTML += '<textarea id="climate" name="climate"></textarea><br>';
+            }
+            else if (componentType === "Inanimate") {
+                formSection.innerHTML += '<label for="name">Inanimate Name:</label>';
+                formSection.innerHTML += '<input type="text" id="name" name="name" required><br>';
+                formSection.innerHTML += '<label for="description">Description:</label>';
+                formSection.innerHTML += '<textarea id="description" name="description"></textarea><br>';
+            }
+            else if (componentType === "Clan") {
+                formSection.innerHTML += '<label for="name">Clan Name:</label>';
+                formSection.innerHTML += '<input type="text" id="name" name="name" required><br>';
+                formSection.innerHTML += '<label for="description">Description:</label>';
+                formSection.innerHTML += '<textarea id="description" name="description"></textarea><br>';
+
+                // Add Related Clans Input
+                formSection.innerHTML += '<label for="related-clans">Related Clans:</label>';
+                formSection.innerHTML += '<div id="related-clans-container">';
+                formSection.innerHTML += '<input type="text" name="related-clans" class="related-clan-input" placeholder="Type to add new or select existing"><br>';
+                formSection.innerHTML += '</div>';
+                formSection.innerHTML += '<button type="button" onclick="addRelatedClanInput()">Add Another Relationship</button><br>';
+
+            }
+            else if (componentType === "Skill") {
+                formSection.innerHTML += '<label for="name">Skill Name:</label>';
+                formSection.innerHTML += '<input type="text" id="name" name="name" required><br>';
+                formSection.innerHTML += '<label for="description">Description:</label>';
+                formSection.innerHTML += '<textarea id="description" name="description"></textarea><br>';
+            }
+        }
+        function addSkillInput() {
+            var container = document.getElementById("skills-container");
+            container.innerHTML += `
+                <div class="skill-entry">
+                    <input type="text" name="skills[]" class="skills-input" placeholder="Type to add new or select existing">
+                    <label for="skill-value">Value (0-100):</label>
+                    <input type="number" name="skill-values[]" class="skill-value-input" min="0" max="100" required><br>
+                </div>`;
+        }
+
+        function addInanimateInput() {
+            var container = document.getElementById("inanimates-container");
+            container.innerHTML += '<input type="text" name="inanimates" class="inanimates-input" placeholder="Type to add new or select existing"><br>';
+        }
+
+        function addRelatedClanInput() {
+            var container = document.getElementById("related-clans-container");
+            container.innerHTML += `
+                <div class="related-clan-entry">
+                    <input type="text" name="related-clans[]" class="related-clan-input" placeholder="Type to add new or select existing">
+                    <label for="relationship-type">Relationship Type:</label>
+                    <input type="text" name="relationship-types[]" class="relationship-type-input" placeholder="e.g., ally, at war" required><br>
+                </div>`;
+        }
+    </script>
+</head>
+<body>
+    <h1>Create a New World Component</h1>
+    <form method="post" action="{{ url_for('save_world_component') }}">
+        <label for="component-type">Select Component Type:</label>
+        <select id="component-type" name="component-type" onchange="updateForm()" required>
+            <option value="">--Select--</option>
+            <option value="Character">Character</option>
+            <option value="Location">Location</option>
+            <option value="Clan">Clan</option>
+            <option value="Inanimate">Inanimate</option>
+            <option value="Skill">Skill</option>
+        </select><br>
+        
+        <div id="form-section">
+            <!-- Dynamic form content based on selection -->
+        </div>
+        
+        <button type="submit">Create Object</button>
+    </form>
+</body>
+</html>

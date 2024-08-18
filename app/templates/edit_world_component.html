@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit {{ component_type }}</title>
+    <script>
+        function addSkillInput(skillName = '', skillValue = 50) {
+            var container = document.getElementById("skills-container");
+            container.innerHTML += `
+                <div class="skill-entry">
+                    <input type="text" name="skills[]" class="skills-input" value="${skillName}" placeholder="Type to add new or select existing">
+                    <label for="skill-value">Value (0-100):</label>
+                    <input type="number" name="skill-values[]" class="skill-value-input" value="${skillValue}" min="0" max="100" required>
+                    <button type="button" onclick="removeSkillInput(this)">Remove</button><br>
+                </div>`;
+        }
+
+        function removeSkillInput(element) {
+            element.parentNode.remove();
+        }
+
+        function addInanimateInput(inanimateName = '') {
+            var container = document.getElementById("inanimates-container");
+            container.innerHTML += `
+                <div class="inanimate-entry">
+                    <input type="text" name="inanimates[]" class="inanimates-input" value="${inanimateName}" placeholder="Type to add new or select existing">
+                    <button type="button" onclick="removeInanimateInput(this)">Remove</button><br>
+                </div>`;
+        }
+
+        function removeInanimateInput(element) {
+            element.parentNode.remove();
+        }
+
+        function addRelatedClanInput(relatedClanName = '', relationshipType = '') {
+            var container = document.getElementById("related-clans-container");
+            container.innerHTML += `
+                <div class="related-clan-entry">
+                    <input type="text" name="related-clans[]" class="related-clan-input" value="${relatedClanName}" placeholder="Type to add new or select existing">
+                    <label for="relationship-type">Relationship Type:</label>
+                    <input type="text" name="relationship-types[]" class="relationship-type-input" value="${relationshipType}" placeholder="e.g., ally, at war" required>
+                    <button type="button" onclick="removeRelatedClanInput(this)">Remove</button><br>
+                </div>`;
+        }
+
+        function removeRelatedClanInput(element) {
+            element.parentNode.remove();
+        }
+
+        window.onload = function() {
+            {% if component_type == 'Character' %}
+                {% for skill, value in skills_with_values %}
+                    addSkillInput("{{ skill.name }}", {{ value }});
+                {% endfor %}
+                {% for inanimate in component.inanimates %}
+                    addInanimateInput("{{ inanimate.name }}");
+                {% endfor %}
+            {% elif component_type == 'Clan' %}
+                {% for related_clan, relationship_type in related_clans %}
+                    addRelatedClanInput("{{ related_clan.name }}", "{{ relationship_type }}");
+                {% endfor %}
+            {% endif %}
+        }
+    </script>
+</head>
+<body>
+    <h1>Edit {{ component_type }}</h1>
+    <form method="post">
+        <label for="name">{{ component_type }} Name:</label>
+        <input type="text" id="name" name="name" value="{{ component.name }}" required><br>
+
+        <label for="description">Description:</label>
+        <textarea id="description" name="description">{{ component.description }}</textarea><br>
+
+        {% if component_type == 'Character' %}
+            <!-- Skills Section -->
+            <label for="skills">Skills:</label>
+            <div id="skills-container">
+                <!-- Skill inputs populated by JavaScript based on current character's skills -->
+            </div>
+            <button type="button" onclick="addSkillInput()">Add Another Skill</button><br>
+
+            <!-- Location Section -->
+            <label for="location">Location:</label>
+            <input type="text" id="location-input" name="location-input" value="{{ component.location.name if component.location else '' }}" placeholder="Type to add new or select existing"><br>
+
+            <!-- Clan Section -->
+            <label for="clan">Clan:</label>
+            <input type="text" id="clan-input" name="clan-input" value="{{ component.clan.name if component.clan else '' }}" placeholder="Type to add new or select existing"><br>
+
+            <!-- Inanimates Section -->
+            <label for="inanimates">Inanimates:</label>
+            <div id="inanimates-container">
+                <!-- Inanimate inputs populated by JavaScript based on current character's inanimates -->
+            </div>
+            <button type="button" onclick="addInanimateInput()">Add Another Inanimate</button><br>
+
+        {% elif component_type == 'Location' %}
+            <!-- Location-specific fields -->
+            <label for="climate">Climate:</label>
+            <textarea id="climate" name="climate">{{ component.climate }}</textarea><br>
+
+        {% elif component_type == 'Clan' %}
+            <!-- Related Clans Section -->
+            <label for="related-clans">Related Clans:</label>
+            <div id="related-clans-container">
+                <!-- Related Clan inputs populated by JavaScript based on current clan's relationships -->
+            </div>
+            <button type="button" onclick="addRelatedClanInput()">Add Another Relationship</button><br>
+
+        {% endif %}
+
+        <button type="submit">Update {{ component_type }}</button>
+    </form>
+    <a href="{{ url_for('dashboard') }}">Cancel</a>
+</body>
+</html>

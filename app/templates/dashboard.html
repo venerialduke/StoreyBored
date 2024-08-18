@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+</head>
+<body>
+    <h1>Your Dashboard</h1>
+    
+    <h2>Your Characters</h2>
+    <ul>
+        {% for character in characters %}
+            <li>{{ character.name }}: {{ character.description }}
+                <a href="{{ url_for('edit_world_component', component_type='Character', id=character.id) }}">Edit</a>
+            </li>
+            
+        {% endfor %}
+    </ul>
+
+    <h2>Your Locations</h2>
+    <ul>
+        {% for location in locations %}
+            <li>{{ location.name }}: {{ location.description }}
+                <a href="{{ url_for('edit_world_component', component_type='Location', id=location.id) }}">Edit</a>
+            </li>
+        {% endfor %}
+    </ul>
+
+    <h2>Your Clans</h2>
+    <ul>
+        {% for clan in clans %}
+            <li>{{ clan.name }}: {{ clan.description }}
+                <a href="{{ url_for('edit_world_component', component_type='Clan', id=clan.id) }}">Edit</a>
+            </li>
+        {% endfor %}
+    </ul>
+
+    <h2>Your Inanimates</h2>
+    <ul>
+        {% for inanimate in inanimates %}
+            <li>{{ inanimate.name }}: {{ inanimate.description }}
+                <a href="{{ url_for('edit_world_component', component_type='Inanimate', id=inanimate.id) }}">Edit</a>
+            </li>
+        {% endfor %}
+    </ul>
+
+    <h2>Your Skills</h2>
+    <ul>
+        {% for skill in skills %}
+            <li>{{ skill.name }}: {{ skill.description }} </li>
+        {% endfor %}
+    </ul>
+
+    <a href="{{ url_for('create_world_component') }}">Create New World Component</a><br>
+</body>
+</html>
