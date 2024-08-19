@@ -1,21 +1,10 @@
-from openai import OpenAI
-import os
-from flask import render_template, flash, redirect, url_for, request
-from app import app, db, login
-from app.models import Character, Location, Clan, Inanimate, Skill, WorldObject, character_skills, character_inanimate, User, clan_relationships
-#from werkzeug.urls import url_parse
-from flask_login import current_user, login_user, logout_user, login_required, LoginManager
 
-# Set your OpenAI API key
-client = OpenAI(
-  api_key=os.environ['OPENAI_API_KEY'],  # this is also the default, it can be omitted
-)
-
-print(f"API Key: {os.environ['OPENAI_API_KEY']}")
-
-@login.user_loader
-def load_user(id):
-    return User.query.get(int(id))
+from flask import render_template, redirect, url_for, flash, request, jsonify
+from flask_login import login_user, logout_user, login_required, current_user
+from app import app, driver
+from app.models import User
+from werkzeug.security import generate_password_hash, check_password_hash
+import uuid
 
 @app.route('/')
 def index():
@@ -28,15 +17,26 @@ def signup():
         email = request.form['email']
         password = request.form['password']
 
-        if User.query.filter_by(username=username).first():
-            flash('Username already exists')
-            return redirect(url_for('signup'))
+        # Hash the password
+        hashed_password = generate_password_hash(password)
 
-        user = User(username=username, email=email)
-        user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
-        login_user(user)
+        with driver.session() as session:
+            # Check if user already exists
+            result = session.run("MATCH (u:User {username: $username}) RETURN u", username=username)
+            if result.single():
+                flash('Username already exists. Please try another one.')
+                return redirect(url_for('signup'))
+
+            # Create new user
+            result = session.run(
+                "CREATE (u:User {username: $username, email: $email, password_hash: $password_hash}) RETURN u",
+                username=username, email=email, password_hash=hashed_password
+            )
+            user_node = result.single()["u"]
+            new_user = User.from_node(user_node)
+
+        # Log the user in
+        login_user(new_user)
         return redirect(url_for('dashboard'))
 
     return render_template('signup.html')
@@ -46,280 +46,175 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        user = User.query.filter_by(username=username).first()
-        if user is None or not user.check_password(password):
-            flash('Invalid username or password')
-            return redirect(url_for('login'))
-        login_user(user)
-        return redirect(url_for('dashboard'))
+
+        with driver.session() as session:
+            result = session.run("MATCH (u:User {username: $username}) RETURN u", username=username)
+            user_data = result.single()
+            if user_data:
+                user_node = user_data["u"]
+                if check_password_hash(user_node["password_hash"], password):
+                    user = User.from_node(user_node)
+                    login_user(user)
+                    return redirect(url_for('dashboard'))
+
+        flash('Login failed. Check your username and password.')
+        return redirect(url_for('login'))
+
     return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    characters = Character.query.filter_by(user_id=current_user.id).all()
-    skills = Skill.query.filter_by(user_id=current_user.id).all()
-    locations = Location.query.filter_by(user_id=current_user.id).all()
-    inanimates = Inanimate.query.filter_by(user_id=current_user.id).all()
-    clans = Clan.query.filter_by(user_id=current_user.id).all()
-    return render_template('dashboard.html', characters=characters,skills=skills,locations=locations,inanimates=inanimates,clans=clans)
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (u:User {username: $username})-[:OWNS]->(w:World)
+            RETURN w
+            """,
+            username=current_user.username
+        )
+        worlds = [{"name": record["w"]["name"], "description": record["w"]["description"], "uuid": record["w"]["uuid"]} for record in result]
 
-@app.route('/logout')
-def logout():
-    logout_user()
-    return redirect(url_for('index'))
+    return render_template('dashboard.html', worlds=worlds)
 
-@app.route('/create_world_component', methods=['GET'])
+@app.route('/create_world', methods=['GET', 'POST'])
 @login_required
-def create_world_component():
-    return render_template('create_world_component.html')
+def create_world():
+    if request.method == 'POST':
+        name = request.form['name']
+        description = request.form['description']
+        initial_timeline = request.form['initial_timeline']
+        world_uuid = str(uuid.uuid4())  # Generate a unique identifier for the world
 
-@app.route('/save_world_component', methods=['POST'])
-@login_required
-def save_world_component():
-    component_type = request.form['component-type']
-    name = request.form['name']
-    description = request.form.get('description', '')
+        with driver.session() as session:
+            # Create the world node
+            result = session.run(
+                """
+                MATCH (u:User {username: $username})
+                CREATE (w:World {name: $name, description: $description, uuid: $uuid})
+                CREATE (u)-[:OWNS]->(w)
+                RETURN w
+                """,
+                username=current_user.username,
+                name=name,
+                description=description,
+                uuid=world_uuid
+            )
+            world = result.single()["w"]
 
-    if component_type == 'Character':
-        character = Character.query.filter_by(name=name, user_id=current_user.id).first()
-        if not character:
-            character = Character(name=name, description=description, user_id=current_user.id)
-            db.session.add(character)
+            timeline_uuid = str(uuid.uuid4())  # Generate a unique identifier for the timeline
+            # Create the initial timeline for the world
+            session.run(
+                """
+                MATCH (w:World {uuid: $uuid})
+                CREATE (t:WorldTimeline {name: $timeline_name, uuid: $timeline_uuid})
+                CREATE (w)-[:HAS_TIMELINE]->(t)
+                """,
+                uuid=world_uuid,
+                timeline_name=initial_timeline,
+                timeline_uuid=timeline_uuid
+            )
 
-        # Handle related skills with values
-        skills = request.form.getlist('skills[]')
-        skill_values = request.form.getlist('skill-values[]')
-        for skill_name, skill_value in zip(skills, skill_values):
-            skill = Skill.query.filter_by(name=skill_name, user_id=current_user.id).first()
-            if not skill:
-                skill = Skill(name=skill_name, user_id=current_user.id)
-                db.session.add(skill)
-            # Insert into the character_skills association table
-            stmt = character_skills.insert().values(character_id=character.id, skill_id=skill.id, value=int(skill_value))
-            db.session.execute(stmt)
-
-        # Handle related inanimates
-        inanimates = request.form.getlist('inanimates[]')
-        for inanimate_name in inanimates:
-            inanimate = Inanimate.query.filter_by(name=inanimate_name, user_id=current_user.id).first()
-            if not inanimate:
-                inanimate = Inanimate(name=inanimate_name, user_id=current_user.id)
-                db.session.add(inanimate)
-            character.inanimates.append(inanimate)
-
-        # Handle location
-        location_name = request.form.get('location-input', '').strip()
-        if location_name:
-            location = Location.query.filter_by(name=location_name, user_id=current_user.id).first()
-            if not location:
-                location = Location(name=location_name, user_id=current_user.id)
-                db.session.add(location)
-            character.location = location
-
-        # Handle clan
-        clan_name = request.form.get('clan-input', '').strip()
-        if clan_name:
-            clan = Clan.query.filter_by(name=clan_name, user_id=current_user.id).first()
-            if not clan:
-                clan = Clan(name=clan_name, user_id=current_user.id)
-                db.session.add(clan)
-            character.clan = clan
-
-        db.session.commit()
-
-    elif component_type == 'Location':
-        location = Location.query.filter_by(name=name, user_id=current_user.id).first()
-        if not location:
-            location = Location(name=name, description=description, user_id=current_user.id)
-            db.session.add(location)
-
-        climate = request.form.get('climate', '')
-        if climate:
-            location.climate = climate
-
-        db.session.commit()
-
-    elif component_type == 'Clan':
-        clan = Clan.query.filter_by(name=name, user_id=current_user.id).first()
-        if not clan:
-            clan = Clan(name=name, description=description, user_id=current_user.id)
-            db.session.add(clan)
-            db.session.commit()  # Commit to get the ID for the new clan
-
-        # Handle related clans with relationship types
-        related_clans = request.form.getlist('related-clans[]')
-        relationship_types = request.form.getlist('relationship-types[]')
-        for related_clan_name, relationship_type in zip(related_clans, relationship_types):
-            related_clan = Clan.query.filter_by(name=related_clan_name, user_id=current_user.id).first()
-            if not related_clan:
-                related_clan = Clan(name=related_clan_name, user_id=current_user.id)
-                db.session.add(related_clan)
-                db.session.commit()  # Commit to get the ID for the new related clan
-            
-            # Now that we have the ID, insert into the association table
-            stmt = clan_relationships.insert().values(clan_id=clan.id, related_clan_id=related_clan.id, relationship_type=relationship_type)
-            db.session.execute(stmt)
-
-        db.session.commit()
-
-    elif component_type == 'Inanimate':
-        inanimate = Inanimate.query.filter_by(name=name, user_id=current_user.id).first()
-        if not inanimate:
-            inanimate = Inanimate(name=name, description=description, user_id=current_user.id)
-            db.session.add(inanimate)
-        db.session.commit()
-
-    elif component_type == 'Skill':
-        skill = Skill.query.filter_by(name=name, user_id=current_user.id).first()
-        if not skill:
-            skill = Skill(name=name, description=description, user_id=current_user.id)
-            db.session.add(skill)
-        db.session.commit()
-
-    return redirect(url_for('dashboard'))
-
-@app.route('/edit_world_component/<component_type>/<int:id>', methods=['GET', 'POST'])
-@login_required
-def edit_world_component(component_type, id):
-    # Retrieve the component based on the type and ID
-    if component_type == 'Character':
-        component = Character.query.get_or_404(id)
-
-        # Prepare a list of skills with their associated values for this character
-        skills_with_values = []
-        for skill in component.skills:
-            value = db.session.query(character_skills.c.value).filter_by(character_id=component.id, skill_id=skill.id).scalar()
-            skills_with_values.append((skill, value))
-
-        related_clans = []
-
-    elif component_type == 'Location':
-        component = Location.query.get_or_404(id)
-        skills_with_values = []  # No skills for locations, but we need to pass this to the template
-        related_clans = []
-
-    elif component_type == 'Inanimate':
-        component = Inanimate.query.get_or_404(id)
-        skills_with_values = []  # No skills for locations, but we need to pass this to the template
-        related_clans = []
-
-    elif component_type == 'Clan':
-        component = Clan.query.get_or_404(id)
-        
-        # Fetch related clans and their relationship types
-        related_clans = []
-        relationships = db.session.query(clan_relationships).filter_by(clan_id=component.id).all()
-        for relationship in relationships:
-            related_clan = Clan.query.get(relationship.related_clan_id)
-            related_clans.append((related_clan, relationship.relationship_type))
-
-        skills_with_values = []  # No skills for clans, but we need to pass this to the template
-
-
-    else:
-        flash("Invalid component type.")
+        flash(f"World '{world['name']}' created successfully with initial timeline '{initial_timeline}'!")
         return redirect(url_for('dashboard'))
+
+    return render_template('create_world.html')
+
+@app.route('/enter_world/<world_uuid>', methods=['GET', 'POST'])
+@login_required
+def enter_world(world_uuid):
+    selected_timeline_name = None
+    world_nodes = []
 
     if request.method == 'POST':
-        # Update component with form data
-        component.name = request.form['name']
-        component.description = request.form.get('description', component.description)
+        selected_timeline_uuid = request.form.get('timeline')
+        
+        if selected_timeline_uuid:
+            with driver.session() as session:
+                # Get the selected timeline name
+                result = session.run(
+                    "MATCH (t:WorldTimeline {uuid: $timeline_uuid}) RETURN t.name AS name",
+                    timeline_uuid=selected_timeline_uuid
+                )
+                selected_timeline_name = result.single()["name"]
 
-        if component_type == 'Character':
-            # Handle skills update
-            component.skills = []  # Clear existing skills
-            skills = request.form.getlist('skills[]')
-            skill_values = request.form.getlist('skill-values[]')
-            
-            for skill_name, skill_value in zip(skills, skill_values):
-                # Find or create the skill
-                skill = Skill.query.filter_by(name=skill_name, user_id=current_user.id).first()
-                if not skill:
-                    skill = Skill(name=skill_name, user_id=current_user.id)
-                    db.session.add(skill)
-                
-                # Add the skill to the character with the specific value
-                stmt = character_skills.insert().values(character_id=component.id, skill_id=skill.id, value=int(skill_value))
-                db.session.execute(stmt)
+                # Get all nodes related to the selected timeline
+                result = session.run(
+                    """
+                    MATCH (t:WorldTimeline {uuid: $timeline_uuid})<-[:IN_TIMELINE]-(n:WorldNode)
+                    RETURN n
+                    """,
+                    timeline_uuid=selected_timeline_uuid
+                )
+                world_nodes = [record["n"] for record in result]
 
-            # Handle location update
-            location_name = request.form.get('location-input', '').strip()
-            if location_name:
-                location = Location.query.filter_by(name=location_name, user_id=current_user.id).first()
-                if not location:
-                    location = Location(name=location_name, user_id=current_user.id)
-                    db.session.add(location)
-                component.location = location
+    with driver.session() as session:
+        # Fetch the world and its timelines
+        result = session.run(
+            "MATCH (w:World {uuid: $world_uuid})-[:HAS_TIMELINE]->(t:WorldTimeline) RETURN w, collect(t) as timelines",
+            world_uuid=world_uuid
+        )
+        record = result.single()
+        world = record['w']
+        timelines = record['timelines']
 
-            # Handle clan update
-            clan_name = request.form.get('clan-input', '').strip()
-            if clan_name:
-                clan = Clan.query.filter_by(name=clan_name, user_id=current_user.id).first()
-                if not clan:
-                    clan = Clan(name=clan_name, user_id=current_user.id)
-                    db.session.add(clan)
-                component.clan = clan
+    return render_template('world_dashboard.html', world=world, timelines=timelines, selected_timeline_name=selected_timeline_name, world_nodes=world_nodes)
 
-            # Handle inanimate update
-            component.inanimates = []  # Clear existing inanimates
-            inanimates = request.form.getlist('inanimates[]')
-            for inanimate_name in inanimates:
-                inanimate = Inanimate.query.filter_by(name=inanimate_name, user_id=current_user.id).first()
-                if not inanimate:
-                    inanimate = Inanimate(name=inanimate_name, user_id=current_user.id)
-                    db.session.add(inanimate)
-                component.inanimates.append(inanimate)
-
-        elif component_type == 'Location':
-            # Handle climate update
-            component.climate = request.form.get('climate', component.climate)
-
-        elif component_type == 'Clan':
-            # Update clan relationships
-            db.session.query(clan_relationships).filter_by(clan_id=component.id).delete()  # Clear existing relationships
-
-            related_clans = request.form.getlist('related-clans[]')
-            relationship_types = request.form.getlist('relationship-types[]')
-            for related_clan_name, relationship_type in zip(related_clans, relationship_types):
-                related_clan = Clan.query.filter_by(name=related_clan_name, user_id=current_user.id).first()
-                if not related_clan:
-                    related_clan = Clan(name=related_clan_name, user_id=current_user.id)
-                    db.session.add(related_clan)
-                    db.session.commit()  # Commit to get the ID for the new related clan
-                
-                # Now that we have the ID, insert into the association table
-                stmt = clan_relationships.insert().values(clan_id=component.id, related_clan_id=related_clan.id, relationship_type=relationship_type)
-                db.session.execute(stmt)
-
-        db.session.commit()
-        flash(f"{component_type} updated successfully!")
-        return redirect(url_for('dashboard'))
-
-    # Render the edit template with the current component data
-    return render_template('edit_world_component.html', component=component, component_type=component_type, skills_with_values=skills_with_values,related_clans=related_clans)
-
-@app.route('/generate_story')
+@app.route('/create_timeline/<uuid:world_uuid>', methods=['GET', 'POST'])
 @login_required
-def generate_story():
-    # Gather all characters for the current user
-    characters = Character.query.filter_by(user_id=current_user.id).all()
+def create_timeline(world_uuid):
+    if request.method == 'POST':
+        timeline_name = request.form['timeline_name']
+        timeline_uuid = str(uuid.uuid4())  # Generate a unique identifier for the timeline
 
-    # Create a context string with all character names and descriptions
-    context = "The following characters are involved in this story:\n"
-    for character in characters:
-        context += f"Name: {character.name}, Description: {character.description}\n"
+        with driver.session() as session:
+            session.run(
+                """
+                MATCH (w:World {uuid: $world_uuid})
+                CREATE (t:WorldTimeline {name: $timeline_name, uuid: $timeline_uuid})
+                CREATE (w)-[:HAS_TIMELINE]->(t)
+                """,
+                world_uuid=str(world_uuid),
+                timeline_name=timeline_name,
+                timeline_uuid=timeline_uuid
+            )
+        
+        flash(f"Timeline '{timeline_name}' created successfully!")
+        return redirect(url_for('enter_world', world_uuid=world_uuid))
 
-    # Generate the story using the correct OpenAI method
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",  # Use "gpt-4" if you're using GPT-4
-        messages=[
-            {"role": "system", "content": "You are a creative story writer."},
-            {"role": "user", "content": f"{context} Write a short story involving these characters."}
-        ]
-    )
+    return render_template('create_timeline.html')
 
-    #story = response['choices'][0]['message']['content'].strip()
-    story = response.choices[0].message.content
+@app.route('/create_node/<uuid:world_uuid>/<uuid:timeline_uuid>', methods=['GET', 'POST'])
+@login_required
+def create_node(world_uuid, timeline_uuid):
+    if request.method == 'POST':
+        node_name = request.form['node_name']
+        node_type = request.form['node_type']
+        node_description = request.form['node_description']
+        node_uuid = str(uuid.uuid4())  # Generate a unique identifier for the node
 
-    return render_template('story.html', story=story)
+        with driver.session() as session:
+            session.run(
+                """
+                MATCH (w:World {uuid: $world_uuid})-[:HAS_TIMELINE]->(t:WorldTimeline {uuid: $timeline_uuid})
+                CREATE (n:WorldNode {name: $node_name, type: $node_type, description: $node_description, uuid: $node_uuid})
+                CREATE (t)-[:CONTAINS_NODE]->(n)
+                """,
+                world_uuid=str(world_uuid),
+                timeline_uuid=str(timeline_uuid),
+                node_name=node_name,
+                node_type=node_type,
+                node_description=node_description,
+                node_uuid=node_uuid
+            )
+        
+        flash(f"World Node '{node_name}' created successfully!")
+        return redirect(url_for('enter_world', world_uuid=world_uuid))
+
+    return render_template('create_node.html', world_uuid=world_uuid, timeline_uuid=timeline_uuid)

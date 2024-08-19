@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Timeline</title>
+</head>
+<body>
+    <h1>Create a New Timeline</h1>
+    <form method="post">
+        <label for="timeline_name">Timeline Name:</label>
+        <input type="text" id="timeline_name" name="timeline_name" required><br>
+        <button type="submit">Create Timeline</button>
+    </form>
+    <a href="{{ url_for('enter_world', world_uuid=world_uuid) }}">Cancel</a>
+</body>
+</html>

@@ -1,13 +1,9 @@
-from app import app, db
-from config import Config  # Import the Config class
+from app import app, driver
 
-# Apply the configuration to the Flask app
-app.config.from_object(Config)
-
-# Automatically create the tables if they don't exist
-with app.app_context():
-    #db.drop_all()
-    db.create_all()
+def wipe_neo4j_database():
+    with driver.session() as session:
+        session.run("MATCH (n) DETACH DELETE n")
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    wipe_neo4j_database()  # Wipe the database before starting the app
+    app.run(debug=True, port=5001)

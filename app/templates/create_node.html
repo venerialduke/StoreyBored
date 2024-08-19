@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create World Node</title>
+</head>
+<body>
+    <h1>Create a New World Node</h1>
+    <form method="post">
+        <label for="node_name">Node Name:</label>
+        <input type="text" id="node_name" name="node_name" required><br>
+
+        <label for="node_type">Node Type:</label>
+        <input type="text" id="node_type" name="node_type" required><br>
+
+        <label for="node_description">Node Description:</label>
+        <textarea id="node_description" name="node_description"></textarea><br>
+
+        <button type="submit">Create Node</button>
+    </form>
+
+    <a href="{{ url_for('enter_world', world_uuid=world_uuid) }}">Cancel</a>
+</body>
+</html>

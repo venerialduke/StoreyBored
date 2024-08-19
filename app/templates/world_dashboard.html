@@ -1,0 +1,23 @@
+<h1>{{ world['name'] }}</h1>
+<p>{{ world['description'] }}</p>
+
+<h2>Select Timeline</h2>
+<form method="post">
+    <select name="timeline">
+        {% for timeline in timelines %}
+            <option value="{{ timeline['uuid'] }}">{{ timeline['name'] }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit">Select Timeline</button>
+    <button type="button" onclick="location.href='{{ url_for('create_timeline', world_uuid=world['uuid']) }}'">Create New Timeline</button>
+</form>
+
+<h2>World Nodes in {{ selected_timeline_name }}</h2>
+<ul>
+    {% for node in world_nodes %}
+        <li>{{ node['name'] }} ({{ node['type'] }}): {{ node['description'] }}</li>
+    {% endfor %}
+</ul>
+
+<p>URL: {{ url_for('create_node', world_uuid=world['uuid'], timeline_uuid=selected_timeline_uuid) }}</p>
+<button type="button" onclick="location.href='{{ url_for('create_node', world_uuid=world['uuid'], timeline_uuid=selected_timeline_uuid) }}'">Create New World Node</button>

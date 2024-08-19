@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create New World</title>
+</head>
+<body>
+    <h1>Create a New World</h1>
+    <form method="post">
+        <label for="name">World Name:</label>
+        <input type="text" id="name" name="name" required><br>
+    
+        <label for="description">Description:</label>
+        <textarea id="description" name="description"></textarea><br>
+    
+        <label for="initial_timeline">Initial Timeline:</label>
+        <input type="text" id="initial_timeline" name="initial_timeline" value="PresentTime" required><br>
+    
+        <button type="submit">Create World</button>
+    </form>
+    <a href="{{ url_for('dashboard') }}">Cancel</a>
+</body>
+</html>

@@ -1,6 +1,6 @@
 Flask
-Flask-SQLAlchemy
 werkzeug
 flask-login
 openai
 python-dotenv
+neo4j
