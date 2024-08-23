@@ -19,5 +19,10 @@
     {% endfor %}
 </ul>
 
-<p>URL: {{ url_for('create_node', world_uuid=world['uuid'], timeline_uuid=selected_timeline_uuid) }}</p>
-<button type="button" onclick="location.href='{{ url_for('create_node', world_uuid=world['uuid'], timeline_uuid=selected_timeline_uuid) }}'">Create New World Node</button>
+{% if selected_timeline_uuid %}
+    <!-- Only show the button if a timeline is selected -->
+    <button type="button" onclick="location.href='{{ url_for('create_node', world_uuid=world['uuid'], timeline_uuid=selected_timeline_uuid) }}'">Create New World Node</button>
+{% else %}
+    <!-- Show a message or prompt the user to select a timeline -->
+    <p>Please select a timeline before creating a new world node.</p>
+{% endif %}

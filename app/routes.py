@@ -1,5 +1,6 @@
 
 from flask import render_template, redirect, url_for, flash, request, jsonify
+from flask import session as flask_session
 from flask_login import login_user, logout_user, login_required, current_user
 from app import app, driver
 from app.models import User
@@ -129,34 +130,15 @@ def create_world():
 @app.route('/enter_world/<world_uuid>', methods=['GET', 'POST'])
 @login_required
 def enter_world(world_uuid):
+    # Store the selected world in the Flask session
+    flask_session['selected_world'] = world_uuid
+
     selected_timeline_name = None
-    world_nodes = []
+    selected_timeline_uuid = flask_session.get('selected_timeline')
 
-    if request.method == 'POST':
-        selected_timeline_uuid = request.form.get('timeline')
-        
-        if selected_timeline_uuid:
-            with driver.session() as session:
-                # Get the selected timeline name
-                result = session.run(
-                    "MATCH (t:WorldTimeline {uuid: $timeline_uuid}) RETURN t.name AS name",
-                    timeline_uuid=selected_timeline_uuid
-                )
-                selected_timeline_name = result.single()["name"]
-
-                # Get all nodes related to the selected timeline
-                result = session.run(
-                    """
-                    MATCH (t:WorldTimeline {uuid: $timeline_uuid})<-[:IN_TIMELINE]-(n:WorldNode)
-                    RETURN n
-                    """,
-                    timeline_uuid=selected_timeline_uuid
-                )
-                world_nodes = [record["n"] for record in result]
-
-    with driver.session() as session:
+    with driver.session() as neo4j_session:  # Renaming Neo4j session to avoid conflict
         # Fetch the world and its timelines
-        result = session.run(
+        result = neo4j_session.run(
             "MATCH (w:World {uuid: $world_uuid})-[:HAS_TIMELINE]->(t:WorldTimeline) RETURN w, collect(t) as timelines",
             world_uuid=world_uuid
         )
@@ -164,7 +146,42 @@ def enter_world(world_uuid):
         world = record['w']
         timelines = record['timelines']
 
-    return render_template('world_dashboard.html', world=world, timelines=timelines, selected_timeline_name=selected_timeline_name, world_nodes=world_nodes)
+    # If no timeline is selected, default to the first timeline in the world
+    if not selected_timeline_uuid and timelines:
+        first_timeline = timelines[0]
+        selected_timeline_uuid = first_timeline['uuid']
+        selected_timeline_name = first_timeline['name']
+        flask_session['selected_timeline'] = selected_timeline_uuid
+    elif selected_timeline_uuid:
+        # If a timeline is selected, retrieve its name
+        with driver.session() as neo4j_session:
+            result = neo4j_session.run(
+                "MATCH (t:WorldTimeline {uuid: $timeline_uuid}) RETURN t.name AS name",
+                timeline_uuid=selected_timeline_uuid
+            )
+            selected_timeline_name = result.single()["name"]
+
+    # Fetch nodes associated with the selected timeline
+    world_nodes = []
+    if selected_timeline_uuid:
+        with driver.session() as neo4j_session:
+            result = neo4j_session.run(
+                """
+                MATCH (t:WorldTimeline {uuid: $timeline_uuid})-[:CONTAINS_NODE]->(n:WorldNode)
+                RETURN n
+                """,
+                timeline_uuid=selected_timeline_uuid
+            )
+            world_nodes = [record["n"] for record in result]
+
+    return render_template(
+        'world_dashboard.html',
+        world=world,
+        timelines=timelines,
+        selected_timeline_name=selected_timeline_name,
+        world_nodes=world_nodes,
+        selected_timeline_uuid=selected_timeline_uuid
+    )
 
 @app.route('/create_timeline/<uuid:world_uuid>', methods=['GET', 'POST'])
 @login_required
