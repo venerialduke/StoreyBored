@@ -13,11 +13,20 @@
 </form>
 
 <h2>World Nodes in {{ selected_timeline_name }}</h2>
-<ul>
-    {% for node in world_nodes %}
-        <li>{{ node['name'] }} ({{ node['type'] }}): {{ node['description'] }}</li>
+
+{% if world_nodes_by_type %}
+    {% for node_type, nodes in world_nodes_by_type.items() %}
+        <h3>Type {{ node_type }}</h3>
+        <ul>
+            {% for node in nodes %}
+                <li>{{ node['name'] }}: {{ node['description'] }}</li>
+                <a href="{{ url_for('edit_node', world_uuid=world['uuid'], node_uuid=node['uuid']) }}">Edit</a>
+            {% endfor %}
+        </ul>
     {% endfor %}
-</ul>
+{% else %}
+    <p>No nodes available in the selected timeline.</p>
+{% endif %}
 
 {% if selected_timeline_uuid %}
     <!-- Only show the button if a timeline is selected -->

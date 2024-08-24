@@ -1,0 +1,64 @@
+<h1>Edit Node: {{ node['name'] }}</h1>
+<form method="post">
+    <label for="node_name">Name:</label>
+    <input type="text" id="node_name" name="node_name" value="{{ node['name'] }}" required><br>
+
+    <label for="node_type">Type:</label>
+    <input type="text" id="node_type" name="node_type" value="{{ node['type'] }}" required><br>
+
+    <label for="node_description">Description:</label>
+    <textarea id="node_description" name="node_description">{{ node['description'] }}</textarea><br>
+
+    <h2>Existing Relationships</h2>
+    <ul>
+        {% for relationship in relationships %}
+            <li>{{ relationship.relationship.type }} -> {{ relationship.target_node['name'] }}: {{ relationship.relationship }}</li>
+        {% endfor %}
+    </ul>
+
+
+    <h2>Add or Edit Relationships</h2>
+    <div id="relationship-container">
+        <div class="relationship-entry">
+            <label for="target_node_uuid">Target Node:</label>
+            <select name="relationships[0][target_node_uuid]">
+                {% for target_node in all_nodes %}
+                    <option value="{{ target_node['uuid'] }}">{{ target_node['name'] }}</option>
+                {% endfor %}
+            </select><br>
+
+            <label for="relationship_type">Relationship Type:</label>
+            <input type="text" name="relationships[0][type]" placeholder="e.g., FRIEND, LOCATED_AT"><br>
+
+            <label for="relationship_params">Relationship Parameters (JSON):</label>
+            <input type="text" name="relationships[0][params]" placeholder='{"strength": 10}'><br>
+        </div>
+    </div>
+
+    <button type="button" onclick="addRelationship()">Add Another Relationship</button><br><br>
+    <button type="submit">Save Changes</button>
+</form>
+
+<script>
+function addRelationship() {
+    const container = document.getElementById('relationship-container');
+    const newIndex = container.children.length;
+    const newEntry = document.createElement('div');
+    newEntry.className = 'relationship-entry';
+    newEntry.innerHTML = `
+        <label for="target_node_uuid">Target Node:</label>
+        <select name="relationships[${newIndex}][target_node_uuid]">
+            {% for target_node in all_nodes %}
+                <option value="{{ target_node['uuid'] }}">{{ target_node['name'] }}</option>
+            {% endfor %}
+        </select><br>
+
+        <label for="relationship_type">Relationship Type:</label>
+        <input type="text" name="relationships[${newIndex}][type]" placeholder="e.g., FRIEND, LOCATED_AT"><br>
+
+        <label for="relationship_params">Relationship Parameters (JSON):</label>
+        <input type="text" name="relationships[${newIndex}][params]" placeholder='{"strength": 10}'><br>
+    `;
+    container.appendChild(newEntry);
+}
+</script>

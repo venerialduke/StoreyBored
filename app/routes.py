@@ -130,14 +130,13 @@ def create_world():
 @app.route('/enter_world/<world_uuid>', methods=['GET', 'POST'])
 @login_required
 def enter_world(world_uuid):
-    # Store the selected world in the Flask session
     flask_session['selected_world'] = world_uuid
 
     selected_timeline_name = None
     selected_timeline_uuid = flask_session.get('selected_timeline')
+    world_nodes_by_type = {}
 
-    with driver.session() as neo4j_session:  # Renaming Neo4j session to avoid conflict
-        # Fetch the world and its timelines
+    with driver.session() as neo4j_session:
         result = neo4j_session.run(
             "MATCH (w:World {uuid: $world_uuid})-[:HAS_TIMELINE]->(t:WorldTimeline) RETURN w, collect(t) as timelines",
             world_uuid=world_uuid
@@ -146,14 +145,12 @@ def enter_world(world_uuid):
         world = record['w']
         timelines = record['timelines']
 
-    # If no timeline is selected, default to the first timeline in the world
     if not selected_timeline_uuid and timelines:
         first_timeline = timelines[0]
         selected_timeline_uuid = first_timeline['uuid']
         selected_timeline_name = first_timeline['name']
         flask_session['selected_timeline'] = selected_timeline_uuid
     elif selected_timeline_uuid:
-        # If a timeline is selected, retrieve its name
         with driver.session() as neo4j_session:
             result = neo4j_session.run(
                 "MATCH (t:WorldTimeline {uuid: $timeline_uuid}) RETURN t.name AS name",
@@ -161,8 +158,6 @@ def enter_world(world_uuid):
             )
             selected_timeline_name = result.single()["name"]
 
-    # Fetch nodes associated with the selected timeline
-    world_nodes = []
     if selected_timeline_uuid:
         with driver.session() as neo4j_session:
             result = neo4j_session.run(
@@ -172,14 +167,21 @@ def enter_world(world_uuid):
                 """,
                 timeline_uuid=selected_timeline_uuid
             )
-            world_nodes = [record["n"] for record in result]
+            nodes = [record["n"] for record in result]
+
+            # Group nodes by their type
+            for node in nodes:
+                node_type = node.get('type')
+                if node_type not in world_nodes_by_type:
+                    world_nodes_by_type[node_type] = []
+                world_nodes_by_type[node_type].append(node)
 
     return render_template(
         'world_dashboard.html',
         world=world,
         timelines=timelines,
         selected_timeline_name=selected_timeline_name,
-        world_nodes=world_nodes,
+        world_nodes_by_type=world_nodes_by_type,  # Pass the grouped nodes to the template
         selected_timeline_uuid=selected_timeline_uuid
     )
 
@@ -235,3 +237,91 @@ def create_node(world_uuid, timeline_uuid):
         return redirect(url_for('enter_world', world_uuid=world_uuid))
 
     return render_template('create_node.html', world_uuid=world_uuid, timeline_uuid=timeline_uuid)
+
+
+@app.route('/edit_node/<uuid:world_uuid>/<uuid:node_uuid>', methods=['GET', 'POST'])
+@login_required
+def edit_node(world_uuid, node_uuid):
+    # Convert UUID objects to strings
+    world_uuid_str = str(world_uuid)
+    node_uuid_str = str(node_uuid)
+    selected_timeline_uuid_str = flask_session.get('selected_timeline')
+
+    if request.method == 'POST':
+        # Fetch form data
+        node_name = request.form.get('node_name')
+        node_type = request.form.get('node_type')
+        node_description = request.form.get('node_description')
+        
+        # Update the node in the database
+        with driver.session() as session:
+            session.run(
+                """
+                MATCH (n:WorldNode {uuid: $node_uuid})
+                SET n.name = $node_name, n.type = $node_type, n.description = $node_description
+                """,
+                node_uuid=node_uuid_str,
+                node_name=node_name,
+                node_type=node_type,
+                node_description=node_description
+            )
+        
+        # Handle relationships
+        relationships = request.form.getlist('relationships')
+        for relationship in relationships:
+            target_node_uuid = relationship.get('target_node_uuid')
+            relationship_type = relationship.get('type')
+            relationship_params = relationship.get('params')  # This could be a JSON string or form fields
+
+            with driver.session() as session:
+                session.run(
+                    """
+                    MATCH (n1:WorldNode {uuid: $node_uuid}), (n2:WorldNode {uuid: $target_node_uuid})
+                    MERGE (n1)-[r:$relationship_type]->(n2)
+                    SET r += $relationship_params
+                    """,
+                    node_uuid=node_uuid_str,
+                    target_node_uuid=str(target_node_uuid),
+                    relationship_type=relationship_type,
+                    relationship_params=relationship_params
+                )
+
+        flash('Node and relationships updated successfully!')
+        return redirect(url_for('enter_world', world_uuid=world_uuid_str))
+
+    # On GET request, fetch node details and existing relationships
+    with driver.session() as session:
+        node_result = session.run(
+            "MATCH (n:WorldNode {uuid: $node_uuid}) RETURN n",
+            node_uuid=node_uuid_str
+        )
+        node = node_result.single()['n']
+
+        relationships_result = session.run(
+            "MATCH (n:WorldNode {uuid: $node_uuid})-[r]->(m) RETURN r, m",
+            node_uuid=node_uuid_str
+        )
+        relationships = [
+            {"relationship": record["r"], "target_node": record["m"]}
+            for record in relationships_result
+        ]
+
+        # Fetch all nodes in the selected timeline except the current node
+        all_nodes_result = session.run(
+            """
+            MATCH (t:WorldTimeline {uuid: $timeline_uuid})-[:CONTAINS_NODE]->(n:WorldNode)
+            WHERE n.uuid <> $node_uuid
+            RETURN n
+            """,
+            timeline_uuid=selected_timeline_uuid_str,
+            node_uuid=node_uuid_str
+        )
+        all_nodes = [record["n"] for record in all_nodes_result]
+
+    return render_template(
+        'edit_node.html',
+        node=node,
+        relationships=relationships,
+        all_nodes=all_nodes,  # Pass the nodes to the template
+        world_uuid=world_uuid_str
+    )
