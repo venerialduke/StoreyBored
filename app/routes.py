@@ -242,18 +242,15 @@ def create_node(world_uuid, timeline_uuid):
 @app.route('/edit_node/<uuid:world_uuid>/<uuid:node_uuid>', methods=['GET', 'POST'])
 @login_required
 def edit_node(world_uuid, node_uuid):
-    # Convert UUID objects to strings
     world_uuid_str = str(world_uuid)
     node_uuid_str = str(node_uuid)
     selected_timeline_uuid_str = flask_session.get('selected_timeline')
 
     if request.method == 'POST':
-        # Fetch form data
         node_name = request.form.get('node_name')
         node_type = request.form.get('node_type')
         node_description = request.form.get('node_description')
-        
-        # Update the node in the database
+
         with driver.session() as session:
             session.run(
                 """
@@ -265,26 +262,37 @@ def edit_node(world_uuid, node_uuid):
                 node_type=node_type,
                 node_description=node_description
             )
-        
-        # Handle relationships
-        relationships = request.form.getlist('relationships')
-        for relationship in relationships:
-            target_node_uuid = relationship.get('target_node_uuid')
-            relationship_type = relationship.get('type')
-            relationship_params = relationship.get('params')  # This could be a JSON string or form fields
 
-            with driver.session() as session:
-                session.run(
-                    """
-                    MATCH (n1:WorldNode {uuid: $node_uuid}), (n2:WorldNode {uuid: $target_node_uuid})
-                    MERGE (n1)-[r:$relationship_type]->(n2)
-                    SET r += $relationship_params
-                    """,
-                    node_uuid=node_uuid_str,
-                    target_node_uuid=str(target_node_uuid),
-                    relationship_type=relationship_type,
-                    relationship_params=relationship_params
-                )
+        # Process relationships
+        relationships = request.form.to_dict(flat=False)
+        print(f"Relationships submitted: {relationships}")  # Debugging output
+
+        for i in range(len(relationships.get('relationships[0][target_node_uuid]', []))):
+            target_node_uuid = relationships[f'relationships[{i}][target_node_uuid]'][0]
+            relationship_type = relationships[f'relationships[{i}][type]'][0]
+            relationship_params = relationships[f'relationships[{i}][params]'][0]
+
+            if target_node_uuid and relationship_type:
+                try:
+                    with driver.session() as session:
+                        # Dynamically construct the Cypher query with the relationship type
+                        query = f"""
+                            MATCH (n1:WorldNode {{uuid: $node_uuid}}), (n2:WorldNode {{uuid: $target_node_uuid}})
+                            MERGE (n1)-[r:{relationship_type}]->(n2)
+                        """
+                        # If there are any parameters, add them
+                        if relationship_params:
+                            query += " SET r += $relationship_params"
+
+                        session.run(
+                            query,
+                            node_uuid=node_uuid_str,
+                            target_node_uuid=str(target_node_uuid),
+                            relationship_params=relationship_params
+                        )
+                    print("Relationship created/updated successfully.")  # Debugging output
+                except Exception as e:
+                    print(f"Error creating/updating relationship: {e}")  # Debugging output
 
         flash('Node and relationships updated successfully!')
         return redirect(url_for('enter_world', world_uuid=world_uuid_str))
@@ -322,6 +330,6 @@ def edit_node(world_uuid, node_uuid):
         'edit_node.html',
         node=node,
         relationships=relationships,
-        all_nodes=all_nodes,  # Pass the nodes to the template
+        all_nodes=all_nodes,
         world_uuid=world_uuid_str
     )
