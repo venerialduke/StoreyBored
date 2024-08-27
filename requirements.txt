@@ -1,6 +1,8 @@
+neo4j
+passlib
+bcrypt==3.2.0
 Flask
 werkzeug
 flask-login
 openai
 python-dotenv
-neo4j
