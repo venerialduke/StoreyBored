@@ -88,22 +88,22 @@ class World(NODE):
         if name:
             self.properties["name"] = name
 
-    # Example method to add a node to this world
     def create_or_update_node(self, driver, node_label, node_properties, node_uuid=None, relationship_properties=None):
-        # Generate a UUID for the node if not provided
-        if not node_uuid:
-            node_uuid = str(uuid.uuid4())
-
         # Create or update the NODE object
         node = NODE(uuid=node_uuid, label=node_label, properties=node_properties)
         node.create_or_update(driver)
 
+        # Debug: Print confirmation that the node was created/updated
+        print(f"Node created/updated: {node.uuid}")
+
         # Establish the "CONTAINS" relationship between the world and the node
-        self.create_or_update_relationship(driver, target_node_uuid=node_uuid, relationship_type="CONTAINS", properties=relationship_properties)
+        self.create_or_update_relationship(driver, target_node_uuid=node.uuid, relationship_type="CONTAINS", properties=relationship_properties)
+
+        # Debug: Print confirmation that the relationship was created
+        print(f"Relationship 'CONTAINS' created between World {self.uuid} and Node {node.uuid}")
 
         return node
     
-    #  method to retrieve all nodes in this world
     def get_nodes(self, driver, relationship_type="CONTAINS"):
         return self.find_relationships(driver, relationship_type=relationship_type, unique_nodes=True)
 
