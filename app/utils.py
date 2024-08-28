@@ -13,6 +13,29 @@ class NODE:
         self.label = label
         self.properties = properties or {}
 
+    @classmethod
+    def from_database(cls, driver, uuid):
+        with driver.session() as session:
+            result = session.run("MATCH (n) WHERE n.uuid = $uuid RETURN labels(n) AS labels, n", uuid=uuid)
+            record = result.single()
+
+            if not record:
+                raise ValueError(f"No node found with UUID {uuid}")
+
+            labels = record["labels"]
+            properties = record["n"]
+
+            if "User" in labels:
+                return User(uuid=uuid, properties=properties)
+            elif "World" in labels:
+                return World(uuid=uuid, properties=properties)
+            elif "Location" in labels:
+                return Location(uuid=uuid, properties=properties)
+            elif "Path" in labels:
+                return Path(uuid=uuid, properties=properties)
+            else:
+                return NODE(uuid=uuid, label=labels[0], properties=properties)
+
     def create_or_update(self, driver):
         with driver.session() as session:
             if self.uuid:
@@ -106,9 +129,30 @@ class World(NODE):
     
     def get_nodes(self, driver, relationship_type="CONTAINS"):
         return self.find_relationships(driver, relationship_type=relationship_type, unique_nodes=True)
+    
+    # Method to find all nodes with a certain label
+    def find_nodes_by_label(self, driver, label):
+        with driver.session() as session:
+            query = f"""
+                MATCH (w:World {{uuid: $uuid}})-[:CONTAINS]->(n:{label})
+                RETURN n
+            """
+            result = session.run(query, uuid=self.uuid)
+            nodes = [record["n"] for record in result]
+            return nodes if nodes else None
 
-
-
+    def find_nodes_by_label_and_properties(self, driver, label, properties):
+        with driver.session() as session:
+            # Dynamically build the WHERE clause based on the properties
+            conditions = [f"n.{key} = ${key}" for key in properties.keys()]
+            query = f"""
+                MATCH (w:World {{uuid: $uuid}})-[:CONTAINS]->(n:{label})
+                WHERE {" AND ".join(conditions)}
+                RETURN n
+            """
+            result = session.run(query, uuid=self.uuid, **properties)
+            nodes = [record["n"] for record in result]
+            return nodes if nodes else None
 
 class User(NODE):
     def __init__(self, uuid=None, username=None, properties=None):
@@ -157,3 +201,92 @@ class User(NODE):
     def get_worlds(self, driver):
         return self.find_relationships(driver, relationship_type="OWNS", unique_nodes=True)
         
+class Path(NODE):
+    def __init__(self, uuid=None, properties=None):
+        super().__init__(uuid=uuid, label="Path", properties=properties)
+
+    # Method to connect two locations with this path
+    def connect_locations(self, driver, location_a_uuid, location_b_uuid):
+        # Establish the relationship between the path and both locations
+        self.create_or_update_relationship(driver, target_node_uuid=location_a_uuid, relationship_type="ROUTES_TO")
+        self.create_or_update_relationship(driver, target_node_uuid=location_b_uuid, relationship_type="ROUTES_TO")
+
+    # Method to get all locations connected by this path
+    def get_connected_locations(self, driver):
+        return self.find_relationships(driver, relationship_type="ROUTES_TO", unique_nodes=True)
+
+class Location(NODE):
+    def __init__(self, uuid=None, properties=None):
+        super().__init__(uuid=uuid, label="Location", properties=properties)
+
+    # Method to add a character or object to the location
+    def add_occupant(self, driver, occupant_uuid, properties=None):
+        self.create_or_update_relationship(driver, target_node_uuid=occupant_uuid, relationship_type="OCCUPIED_BY", properties=properties)
+
+    # Method to retrieve all occupants (e.g., characters or objects) at this location
+    def get_occupants(self, driver):
+        return self.find_relationships(driver, relationship_type="OCCUPIED_BY", unique_nodes=True)
+
+    # Method to connect this location to another location via a path
+    def connect_to_location(self, driver, other_location_uuid, path_properties=None):
+        path = Path(properties=path_properties)
+        path.create_or_update(driver)
+        path.connect_locations(driver, self.uuid, other_location_uuid)
+
+    # Method to retrieve all paths connected to this location
+    def get_paths(self, driver):
+        return self.find_relationships(driver, relationship_type="ROUTES_TO", unique_nodes=True)
+    
+    def find_routes_to(self, driver, target_location_uuid, max_depth=5, criteria=None):
+        criteria = criteria or {}
+        with driver.session() as session:
+            # Prepare parameter values
+            start_uuid = self.uuid
+            end_uuid = target_location_uuid
+
+            # Start building the Cypher query
+            query = f"""
+                MATCH p=(start:Location {{uuid: '{start_uuid}'}})<-[:ROUTES_TO*..{max_depth}]-(path:Path)-[:ROUTES_TO*..{max_depth}]->(end:Location {{uuid: '{end_uuid}'}})
+            """
+            
+            # Dynamically build the reduce functions for each criterion
+            aggregates = []
+            conditions = []
+            for param, limits in criteria.items():
+                aggregate = f"reduce(total_{param} = 0, rel in relationships(p) | total_{param} + coalesce(rel.{param}, 0)) AS total_{param}"
+                aggregates.append(aggregate)
+                if 'min' in limits:
+                    conditions.append(f"total_{param} >= {limits['min']}")
+                if 'max' in limits:
+                    conditions.append(f"total_{param} <= {limits['max']}")
+            
+            # Add the WITH clause if there are aggregates
+            if aggregates:
+                query += " WITH p, " + ', '.join(aggregates)
+            
+            # Add the WHERE clause if there are conditions
+            if conditions:
+                query += f" WHERE {' AND '.join(conditions)}"
+            
+            # Finally, return the path
+            query += " RETURN p"
+
+            # Debug: Print the query
+            print("Cypher Query:", query)
+
+            # Execute the query
+            result = session.run(query, start_uuid=start_uuid, end_uuid=end_uuid)
+            
+            paths = []
+            for record in result:
+                path = record["p"]
+                nodes = [node["uuid"] for node in path.nodes]
+                relationships = [{"start": rel.start_node["uuid"], "end": rel.end_node["uuid"], "type": type(rel).__name__} for rel in path.relationships]
+                
+                path_data = {"nodes": nodes, "relationships": relationships}
+                for param in criteria.keys():
+                    path_data[f"total_{param}"] = record.get(f"total_{param}", 0)
+                
+                paths.append(path_data)
+            
+            return paths if paths else None
