@@ -31,8 +31,10 @@ class NODE:
                 return World(uuid=uuid, properties=properties)
             elif "Location" in labels:
                 return Location(uuid=uuid, properties=properties)
-            elif "Path" in labels:
-                return Path(uuid=uuid, properties=properties)
+            elif "Character" in labels:
+                return Character(uuid=uuid, properties=properties)
+            elif "Faction" in labels:
+                return Faction(uuid=uuid, properties=properties)
             else:
                 return NODE(uuid=uuid, label=labels[0], properties=properties)
 
@@ -54,28 +56,52 @@ class NODE:
                 """
                 session.run(query, uuid=self.uuid, properties=self.properties)
 
-    def find_relationships(self, driver, relationship_type=None, unique_nodes=False):
+    def find_relationships(self, driver, relationship_type=None, unique_nodes=False, direction=True):
         with driver.session() as session:
-            if relationship_type:
-                if isinstance(relationship_type, list):
-                    # Multiple relationship types
-                    relationship_types = '|'.join(relationship_type)
-                    query = f"""
-                        MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_types}]->(m)
-                        RETURN r, m
-                    """
+            # Build the MATCH clause based on direction
+            if direction:
+                if relationship_type:
+                    if isinstance(relationship_type, list):
+                        # Multiple relationship types
+                        relationship_types = '|'.join(relationship_type)
+                        query = f"""
+                            MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_types}]->(m)
+                            RETURN r, m
+                        """
+                    else:
+                        # Single relationship type
+                        query = f"""
+                            MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_type}]->(m)
+                            RETURN r, m
+                        """
                 else:
-                    # Single relationship type
+                    # Any relationship type
                     query = f"""
-                        MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_type}]->(m)
+                        MATCH (n:{self.label} {{uuid: $uuid}})-[r]->(m)
                         RETURN r, m
                     """
             else:
-                # Any relationship type
-                query = f"""
-                    MATCH (n:{self.label} {{uuid: $uuid}})-[r]->(m)
-                    RETURN r, m
-                """
+                if relationship_type:
+                    if isinstance(relationship_type, list):
+                        # Multiple relationship types
+                        relationship_types = '|'.join(relationship_type)
+                        query = f"""
+                            MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_types}]-(m)
+                            RETURN r, m
+                        """
+                    else:
+                        # Single relationship type
+                        query = f"""
+                            MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_type}]-(m)
+                            RETURN r, m
+                        """
+                else:
+                    # Any relationship type
+                    query = f"""
+                        MATCH (n:{self.label} {{uuid: $uuid}})-[r]-(m)
+                        RETURN r, m
+                    """
+            
             result = session.run(query, uuid=self.uuid)
             relationships = [(record['r'], record['m']) for record in result]
             
@@ -103,7 +129,6 @@ class NODE:
                 """
             
             session.run(query, uuid=self.uuid, target_node_uuid=target_node_uuid, properties=properties or {})
-
 
 class World(NODE):
     def __init__(self, uuid=None, name=None, properties=None):
@@ -200,20 +225,6 @@ class User(NODE):
     
     def get_worlds(self, driver):
         return self.find_relationships(driver, relationship_type="OWNS", unique_nodes=True)
-        
-class Path(NODE):
-    def __init__(self, uuid=None, properties=None):
-        super().__init__(uuid=uuid, label="Path", properties=properties)
-
-    # Method to connect two locations with this path
-    def connect_locations(self, driver, location_a_uuid, location_b_uuid):
-        # Establish the relationship between the path and both locations
-        self.create_or_update_relationship(driver, target_node_uuid=location_a_uuid, relationship_type="ROUTES_TO")
-        self.create_or_update_relationship(driver, target_node_uuid=location_b_uuid, relationship_type="ROUTES_TO")
-
-    # Method to get all locations connected by this path
-    def get_connected_locations(self, driver):
-        return self.find_relationships(driver, relationship_type="ROUTES_TO", unique_nodes=True)
 
 class Location(NODE):
     def __init__(self, uuid=None, properties=None):
@@ -221,32 +232,26 @@ class Location(NODE):
 
     # Method to add a character or object to the location
     def add_occupant(self, driver, occupant_uuid, properties=None):
-        self.create_or_update_relationship(driver, target_node_uuid=occupant_uuid, relationship_type="OCCUPIED_BY", properties=properties)
+        self.create_or_update_relationship(driver, target_node_uuid=occupant_uuid, relationship_type="OCCUPANT", properties=properties,direction=False)
 
     # Method to retrieve all occupants (e.g., characters or objects) at this location
     def get_occupants(self, driver):
-        return self.find_relationships(driver, relationship_type="OCCUPIED_BY", unique_nodes=True)
+        return self.find_relationships(driver, relationship_type="OCCUPANT", unique_nodes=True,direction=False)
 
-    # Method to connect this location to another location via a path
-    def connect_to_location(self, driver, other_location_uuid, path_properties=None):
-        path = Path(properties=path_properties)
-        path.create_or_update(driver)
-        path.connect_locations(driver, self.uuid, other_location_uuid)
+    # Method to connect this location to another location via a route
+    def connect_to_location(self, driver, other_location_uuid, route_properties=None):
+        self.create_or_update_relationship(driver, target_node_uuid=other_location_uuid, relationship_type="ROUTE", properties=route_properties, direction=False)
 
-    # Method to retrieve all paths connected to this location
-    def get_paths(self, driver):
-        return self.find_relationships(driver, relationship_type="ROUTES_TO", unique_nodes=True)
+    # Method to retrieve all routes connected to this location
+    def get_routes(self, driver):
+        return self.find_relationships(driver, relationship_type="ROUTE", unique_nodes=True, direction=False)
     
     def find_routes_to(self, driver, target_location_uuid, max_depth=5, criteria=None):
         criteria = criteria or {}
         with driver.session() as session:
-            # Prepare parameter values
-            start_uuid = self.uuid
-            end_uuid = target_location_uuid
-
             # Start building the Cypher query
             query = f"""
-                MATCH p=(start:Location {{uuid: '{start_uuid}'}})<-[:ROUTES_TO*..{max_depth}]-(path:Path)-[:ROUTES_TO*..{max_depth}]->(end:Location {{uuid: '{end_uuid}'}})
+                MATCH p=(start:Location {{uuid: '{self.uuid}'}})-[:ROUTE*..{max_depth}]-(end:Location {{uuid: '{target_location_uuid}'}})
             """
             
             # Dynamically build the reduce functions for each criterion
@@ -268,14 +273,14 @@ class Location(NODE):
             if conditions:
                 query += f" WHERE {' AND '.join(conditions)}"
             
-            # Finally, return the path
-            query += " RETURN p"
+            # Finally, return the path and total criteria values
+            query += " RETURN p, " + ', '.join([f"total_{param}" for param in criteria.keys()])
 
             # Debug: Print the query
             print("Cypher Query:", query)
 
             # Execute the query
-            result = session.run(query, start_uuid=start_uuid, end_uuid=end_uuid)
+            result = session.run(query)
             
             paths = []
             for record in result:
@@ -290,3 +295,60 @@ class Location(NODE):
                 paths.append(path_data)
             
             return paths if paths else None
+
+
+class Character(NODE):
+    def __init__(self, uuid=None, properties=None):
+        super().__init__(uuid=uuid, label="Character", properties=properties)
+
+    # Method to add the character to a faction
+    def join_faction(self, driver, faction_uuid, properties=None, direction=False):
+        self.create_or_update_relationship(driver, target_node_uuid=faction_uuid, relationship_type="MEMBER", properties=properties, direction=direction)
+
+    # Method to add the character to a location
+    def occupy_location(self, driver, location_uuid, properties=None, direction=False):
+        self.create_or_update_relationship(driver, target_node_uuid=location_uuid, relationship_type="OCCUPANT", properties=properties, direction=direction)
+
+    # Method to interact with another character
+    def interact_with(self, driver, other_character_uuid, relationship_type="INTERACTS_WITH", properties=None,direction=True):
+        self.create_or_update_relationship(driver, target_node_uuid=other_character_uuid, relationship_type=relationship_type, properties=properties,direction=direction)
+
+    # Method to retrieve all factions this character belongs to
+    def get_factions(self, driver):
+        return self.find_relationships(driver, relationship_type="MEMBER", unique_nodes=True, direction=False)
+
+    # Method to retrieve all locations this character occupies
+    def get_locations(self, driver):
+        return self.find_relationships(driver, relationship_type="OCCUPANT", unique_nodes=True, direction=False)
+
+    # Method to retrieve all characters this character interacts with
+    def get_interactions(self, driver, interaction_type=None):
+        return self.find_relationships(driver, relationship_type=interaction_type or "INTERACTS_WITH", unique_nodes=True)
+    
+class Faction(NODE):
+    def __init__(self, uuid=None, properties=None):
+        super().__init__(uuid=uuid, label="Faction", properties=properties)
+
+    # Method to add a member (character) to the faction
+    def add_member(self, driver, character_uuid, properties=None):
+        self.create_or_update_relationship(driver, target_node_uuid=character_uuid, relationship_type="MEMBER", properties=properties, direction=False)
+
+    # Method to occupy a location
+    def occupy_location(self, driver, location_uuid, properties=None):
+        self.create_or_update_relationship(driver, target_node_uuid=location_uuid, relationship_type="OCCUPANT", properties=properties, direction=False)
+
+    # Method to interact with another faction
+    def interact_with(self, driver, other_faction_uuid, relationship_type="INTERACTS_WITH", properties=None, direction=True):
+        self.create_or_update_relationship(driver, target_node_uuid=other_faction_uuid, relationship_type=relationship_type, properties=properties, direction=direction)
+
+    # Method to retrieve all members of the faction
+    def get_members(self, driver):
+        return self.find_relationships(driver, relationship_type="MEMBER", unique_nodes=True, direction=False)
+
+    # Method to retrieve all locations occupied by the faction
+    def get_locations(self, driver):
+        return self.find_relationships(driver, relationship_type="OCCUPANT", unique_nodes=True, direction=False)
+
+    # Method to retrieve all factions this faction interacts with
+    def get_interactions(self, driver, interaction_type=None):
+        return self.find_relationships(driver, relationship_type=interaction_type or "INTERACTS_WITH", unique_nodes=True)
