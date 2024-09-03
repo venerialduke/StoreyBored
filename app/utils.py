@@ -66,19 +66,19 @@ class NODE:
                         relationship_types = '|'.join(relationship_type)
                         query = f"""
                             MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_types}]->(m)
-                            RETURN r, m
+                            RETURN r, m, labels(m) AS labels
                         """
                     else:
                         # Single relationship type
                         query = f"""
                             MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_type}]->(m)
-                            RETURN r, m
+                            RETURN r, m, labels(m) AS labels
                         """
                 else:
                     # Any relationship type
                     query = f"""
                         MATCH (n:{self.label} {{uuid: $uuid}})-[r]->(m)
-                        RETURN r, m
+                        RETURN r, m, labels(m) AS labels
                     """
             else:
                 if relationship_type:
@@ -87,27 +87,27 @@ class NODE:
                         relationship_types = '|'.join(relationship_type)
                         query = f"""
                             MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_types}]-(m)
-                            RETURN r, m
+                            RETURN r, m, labels(m) AS labels
                         """
                     else:
                         # Single relationship type
                         query = f"""
                             MATCH (n:{self.label} {{uuid: $uuid}})-[r:{relationship_type}]-(m)
-                            RETURN r, m
+                            RETURN r, m, labels(m) AS labels
                         """
                 else:
                     # Any relationship type
                     query = f"""
                         MATCH (n:{self.label} {{uuid: $uuid}})-[r]-(m)
-                        RETURN r, m
+                        RETURN r, m, labels(m) AS labels
                     """
             
             result = session.run(query, uuid=self.uuid)
-            relationships = [(record['r'], record['m']) for record in result]
+            relationships = [(record['r'], record['m'], record['labels']) for record in result]
             
             if unique_nodes:
-                # Process relationships to extract unique nodes
-                nodes = {node['uuid']: node for _, node in relationships}.values()
+                # Process relationships to extract unique nodes and include labels
+                nodes = {node['uuid']: {**node, 'labels': labels} for _, node, labels in relationships}.values()
                 return list(nodes)
             return relationships if relationships else None
 
@@ -153,7 +153,17 @@ class World(NODE):
         return node
     
     def get_nodes(self, driver, relationship_type="CONTAINS"):
-        return self.find_relationships(driver, relationship_type=relationship_type, unique_nodes=True)
+        relationships = self.find_relationships(driver, relationship_type=relationship_type, unique_nodes=True)
+        if relationships:
+            nodes = []
+            for node in relationships:
+                # Ensure the node is a dictionary containing 'properties' and 'labels'
+                nodes.append({
+                    "properties": node,  # Assuming node itself is the properties dictionary
+                    "labels": node["labels"]
+                })
+            return nodes
+        return []
     
     # Method to find all nodes with a certain label
     def find_nodes_by_label(self, driver, label):
@@ -352,3 +362,4 @@ class Faction(NODE):
     # Method to retrieve all factions this faction interacts with
     def get_interactions(self, driver, interaction_type=None):
         return self.find_relationships(driver, relationship_type=interaction_type or "INTERACTS_WITH", unique_nodes=True)
+    

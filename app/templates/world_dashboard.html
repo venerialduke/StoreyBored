@@ -1,37 +1,30 @@
-<h1>{{ world['name'] }}</h1>
-<p>{{ world['description'] }}</p>
-
-<h2>Select Timeline</h2>
-<form method="post">
-    <select name="timeline">
-        {% for timeline in timelines %}
-            <option value="{{ timeline['uuid'] }}">{{ timeline['name'] }}</option>
-        {% endfor %}
-    </select>
-    <button type="submit">Select Timeline</button>
-    <button type="button" onclick="location.href='{{ url_for('create_timeline', world_uuid=world['uuid']) }}'">Create New Timeline</button>
-</form>
-
-<h2>World Nodes in {{ selected_timeline_name }}</h2>
-
-{% if world_nodes_by_type %}
-    {% for node_type, nodes in world_nodes_by_type.items() %}
-        <h3>Type {{ node_type }}</h3>
-        <ul>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ world.properties['name'] }} - World Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h2>{{ world.properties['name'] }} - World Dashboard</h2>
+        <p>Population Limit: {{ world.properties['pop_limit'] }}</p>
+        
+        <h3>World Nodes</h3>
+        <ul class="list-group">
             {% for node in nodes %}
-                <li>{{ node['name'] }}: {{ node['description'] }}</li>
-                <a href="{{ url_for('edit_node', world_uuid=world['uuid'], node_uuid=node['uuid']) }}">Edit</a>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                {{ node['properties']['name'] }} - {{ node['labels'] | join(', ') }}
+                <form action="{{ url_for('app_routes.delete_node', world_uuid=world.uuid, node_uuid=node['properties']['uuid']) }}" method="POST" style="display:inline;">
+                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                </form>
+            </li>
             {% endfor %}
         </ul>
-    {% endfor %}
-{% else %}
-    <p>No nodes available in the selected timeline.</p>
-{% endif %}
-
-{% if selected_timeline_uuid %}
-    <!-- Only show the button if a timeline is selected -->
-    <button type="button" onclick="location.href='{{ url_for('create_node', world_uuid=world['uuid'], timeline_uuid=selected_timeline_uuid) }}'">Create New World Node</button>
-{% else %}
-    <!-- Show a message or prompt the user to select a timeline -->
-    <p>Please select a timeline before creating a new world node.</p>
-{% endif %}
+        
+        <a href="{{ url_for('app_routes.create_node', world_uuid=world.uuid) }}" class="btn btn-primary mt-3">Create New Node</a>
+        <a href="{{ url_for('app_routes.edit_world', world_uuid=world.uuid) }}" class="btn btn-secondary mt-3">Edit World</a> <!-- New Button to Edit World -->
+    </div>
+</body>
+</html>

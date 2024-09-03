@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit World</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script> <!-- or use Cytoscape.js -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #graph {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h2>Edit World - {{ world.properties['name'] }}</h2>
+        <div id="graph"></div>
+        <button id="save-btn" class="btn btn-success mt-3">Save Changes</button>
+    </div>
+
+    <script>
+        const graphData = {{ graph_data|tojson }};
+        // Render the graph here using D3.js or Cytoscape.js
+        // Add event listeners for click, drag, etc.
+
+        // Example: Initial rendering (will require more detailed implementation)
+        const svg = d3.select("#graph").append("svg")
+            .attr("width", "100%")
+            .attr("height", "100%");
+
+        const nodes = svg.selectAll("circle")
+            .data(graphData)
+            .enter().append("circle")
+            .attr("cx", (d, i) => i * 100 + 50)
+            .attr("cy", 100)
+            .attr("r", 20)
+            .attr("fill", "steelblue");
+
+        const labels = svg.selectAll("text")
+            .data(graphData)
+            .enter().append("text")
+            .attr("x", (d, i) => i * 100 + 50)
+            .attr("y", 105)
+            .attr("text-anchor", "middle")
+            .attr("fill", "white")
+            .text(d => d.name);
+
+        nodes.on("click", function(event, d) {
+            // Show edit form for the node
+        });
+
+        // Other interactions: dragging nodes, creating links, deleting, etc.
+    </script>
+</body>
+</html>

@@ -1,335 +1,161 @@
+from flask import Blueprint, render_template, request, redirect, url_for, session, flash
+from app.utils import User, World, NODE
+import os
 
-from flask import render_template, redirect, url_for, flash, request, jsonify
-from flask import session as flask_session
-from flask_login import login_user, logout_user, login_required, current_user
-from app import app, driver
-from app.models import User
-from werkzeug.security import generate_password_hash, check_password_hash
-import uuid
+def create_app_routes(driver):
+    app_routes = Blueprint('app_routes', __name__, template_folder='templates')
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+    @app_routes.route('/')
+    def home():
+        return render_template('login.html')
 
-@app.route('/signup', methods=['GET', 'POST'])
-def signup():
-    if request.method == 'POST':
-        username = request.form['username']
-        email = request.form['email']
-        password = request.form['password']
+    @app_routes.route('/login', methods=['GET', 'POST'])
+    def login():
+        if request.method == 'POST':
+            username = request.form['username']
+            password = request.form['password']
 
-        # Hash the password
-        hashed_password = generate_password_hash(password)
+            user = User(username=username)
+            if user.verify_password(driver, password):
+                session['user_id'] = user.uuid
+                flash(f'Welcome back, {username}!', 'success')
+                return redirect(url_for('app_routes.dashboard'))
+            else:
+                flash('Invalid username or password', 'danger')
 
-        with driver.session() as session:
-            # Check if user already exists
-            result = session.run("MATCH (u:User {username: $username}) RETURN u", username=username)
-            if result.single():
-                flash('Username already exists. Please try another one.')
-                return redirect(url_for('signup'))
+        return render_template('login.html')
 
-            # Create new user
-            result = session.run(
-                "CREATE (u:User {username: $username, email: $email, password_hash: $password_hash}) RETURN u",
-                username=username, email=email, password_hash=hashed_password
-            )
-            user_node = result.single()["u"]
-            new_user = User.from_node(user_node)
+    @app_routes.route('/register', methods=['GET', 'POST'])
+    def register():
+        if request.method == 'POST':
+            print("Register form submitted")
 
-        # Log the user in
-        login_user(new_user)
-        return redirect(url_for('dashboard'))
+            username = request.form['username']
+            password = request.form['password']
+            email = request.form['email']
 
-    return render_template('signup.html')
+            print(f"Username: {username}, Email: {email}")
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
+            user = User(username=username, properties={'email': email})
+            if user.register(driver, password):
+                flash('Registration successful! You can now log in.', 'success')
+                return redirect(url_for('app_routes.login'))
+            else:
+                flash('Username already exists. Please choose another one.', 'danger')
 
-        with driver.session() as session:
-            result = session.run("MATCH (u:User {username: $username}) RETURN u", username=username)
-            user_data = result.single()
-            if user_data:
-                user_node = user_data["u"]
-                if check_password_hash(user_node["password_hash"], password):
-                    user = User.from_node(user_node)
-                    login_user(user)
-                    return redirect(url_for('dashboard'))
+        return render_template('register.html')
 
-        flash('Login failed. Check your username and password.')
-        return redirect(url_for('login'))
+    @app_routes.route('/dashboard')
+    def dashboard():
+        if 'user_id' not in session:
+            flash('You need to log in first.', 'warning')
+            return redirect(url_for('app_routes.login'))
 
-    return render_template('login.html')
+        user = User.from_database(driver, session['user_id'])
+        worlds = user.get_worlds(driver)
 
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
+        return render_template('dashboard.html', worlds=worlds)
 
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    with driver.session() as session:
-        result = session.run(
-            """
-            MATCH (u:User {username: $username})-[:OWNS]->(w:World)
-            RETURN w
-            """,
-            username=current_user.username
-        )
-        worlds = [{"name": record["w"]["name"], "description": record["w"]["description"], "uuid": record["w"]["uuid"]} for record in result]
+    @app_routes.route('/logout')
+    def logout():
+        session.pop('user_id', None)
+        flash('You have been logged out.', 'info')
+        return redirect(url_for('app_routes.login'))
+    
+    @app_routes.route('/create_world', methods=['GET', 'POST'])
+    def create_world():
+        if 'user_id' not in session:
+            flash('You need to log in first.', 'warning')
+            return redirect(url_for('app_routes.login'))
 
-    return render_template('dashboard.html', worlds=worlds)
+        user = User.from_database(driver, session['user_id'])
 
-@app.route('/create_world', methods=['GET', 'POST'])
-@login_required
-def create_world():
-    if request.method == 'POST':
-        name = request.form['name']
-        description = request.form['description']
-        initial_timeline = request.form['initial_timeline']
-        world_uuid = str(uuid.uuid4())  # Generate a unique identifier for the world
+        if request.method == 'POST':
+            world_name = request.form['world_name']
+            world_properties = {
+                'description': request.form.get('description', ''),
+                'pop_limit': request.form.get('pop_limit', 0)
+            }
+            user.create_world(driver, world_name=world_name, world_properties=world_properties)
+            flash(f'World {world_name} created successfully!', 'success')
+            return redirect(url_for('app_routes.dashboard'))
 
-        with driver.session() as session:
-            # Create the world node
-            result = session.run(
-                """
-                MATCH (u:User {username: $username})
-                CREATE (w:World {name: $name, description: $description, uuid: $uuid})
-                CREATE (u)-[:OWNS]->(w)
-                RETURN w
-                """,
-                username=current_user.username,
-                name=name,
-                description=description,
-                uuid=world_uuid
-            )
-            world = result.single()["w"]
+        return render_template('create_world.html')
+    
+    @app_routes.route('/enter_world/<world_uuid>', methods=['GET'])
+    def enter_world(world_uuid):
+        if 'user_id' not in session:
+            flash('You need to log in first.', 'warning')
+            return redirect(url_for('app_routes.login'))
 
-            timeline_uuid = str(uuid.uuid4())  # Generate a unique identifier for the timeline
-            # Create the initial timeline for the world
-            session.run(
-                """
-                MATCH (w:World {uuid: $uuid})
-                CREATE (t:WorldTimeline {name: $timeline_name, uuid: $timeline_uuid})
-                CREATE (w)-[:HAS_TIMELINE]->(t)
-                """,
-                uuid=world_uuid,
-                timeline_name=initial_timeline,
-                timeline_uuid=timeline_uuid
-            )
+        world = World.from_database(driver, uuid=world_uuid)
+        nodes = world.get_nodes(driver)
 
-        flash(f"World '{world['name']}' created successfully with initial timeline '{initial_timeline}'!")
-        return redirect(url_for('dashboard'))
+        return render_template('world_dashboard.html', world=world, nodes=nodes)
+    
+    @app_routes.route('/world/<world_uuid>/create_node', methods=['GET', 'POST'])
+    def create_node(world_uuid):
+        world = World.from_database(driver, uuid=world_uuid)
 
-    return render_template('create_world.html')
+        if request.method == 'POST':
+            # Get the node type (label) and name
+            label = request.form.get('node_type')
+            name = request.form.get('node_name')
+            
+            # Handle custom type input
+            if label == 'custom':
+                label = request.form.get('custom_type')
 
-@app.route('/enter_world/<world_uuid>', methods=['GET', 'POST'])
-@login_required
-def enter_world(world_uuid):
-    flask_session['selected_world'] = world_uuid
+            # Basic properties
+            node_properties = {'name': name}
+            
+            # Collect additional properties from the form
+            property_names = request.form.getlist('property_name[]')
+            property_values = request.form.getlist('property_value[]')
+            
+            # Add each additional property to the node properties
+            for prop_name, prop_value in zip(property_names, property_values):
+                if prop_name and prop_value:
+                    node_properties[prop_name] = prop_value
 
-    selected_timeline_name = None
-    selected_timeline_uuid = flask_session.get('selected_timeline')
-    world_nodes_by_type = {}
+            # Create or update the node
+            world.create_or_update_node(driver, node_label=label, node_properties=node_properties)
+            flash(f'{label} "{name}" has been created.', 'success')
+            return redirect(url_for('app_routes.enter_world', world_uuid=world_uuid))
 
-    with driver.session() as neo4j_session:
-        result = neo4j_session.run(
-            "MATCH (w:World {uuid: $world_uuid})-[:HAS_TIMELINE]->(t:WorldTimeline) RETURN w, collect(t) as timelines",
-            world_uuid=world_uuid
-        )
-        record = result.single()
-        world = record['w']
-        timelines = record['timelines']
-
-    if not selected_timeline_uuid and timelines:
-        first_timeline = timelines[0]
-        selected_timeline_uuid = first_timeline['uuid']
-        selected_timeline_name = first_timeline['name']
-        flask_session['selected_timeline'] = selected_timeline_uuid
-    elif selected_timeline_uuid:
-        with driver.session() as neo4j_session:
-            result = neo4j_session.run(
-                "MATCH (t:WorldTimeline {uuid: $timeline_uuid}) RETURN t.name AS name",
-                timeline_uuid=selected_timeline_uuid
-            )
-            selected_timeline_name = result.single()["name"]
-
-    if selected_timeline_uuid:
-        with driver.session() as neo4j_session:
-            result = neo4j_session.run(
-                """
-                MATCH (t:WorldTimeline {uuid: $timeline_uuid})-[:CONTAINS_NODE]->(n:WorldNode)
-                RETURN n
-                """,
-                timeline_uuid=selected_timeline_uuid
-            )
-            nodes = [record["n"] for record in result]
-
-            # Group nodes by their type
-            for node in nodes:
-                node_type = node.get('type')
-                if node_type not in world_nodes_by_type:
-                    world_nodes_by_type[node_type] = []
-                world_nodes_by_type[node_type].append(node)
-
-    return render_template(
-        'world_dashboard.html',
-        world=world,
-        timelines=timelines,
-        selected_timeline_name=selected_timeline_name,
-        world_nodes_by_type=world_nodes_by_type,  # Pass the grouped nodes to the template
-        selected_timeline_uuid=selected_timeline_uuid
-    )
-
-@app.route('/create_timeline/<uuid:world_uuid>', methods=['GET', 'POST'])
-@login_required
-def create_timeline(world_uuid):
-    if request.method == 'POST':
-        timeline_name = request.form['timeline_name']
-        timeline_uuid = str(uuid.uuid4())  # Generate a unique identifier for the timeline
-
-        with driver.session() as session:
-            session.run(
-                """
-                MATCH (w:World {uuid: $world_uuid})
-                CREATE (t:WorldTimeline {name: $timeline_name, uuid: $timeline_uuid})
-                CREATE (w)-[:HAS_TIMELINE]->(t)
-                """,
-                world_uuid=str(world_uuid),
-                timeline_name=timeline_name,
-                timeline_uuid=timeline_uuid
-            )
+        return render_template('create_node.html', world=world)
+    
+    @app_routes.route('/world/<world_uuid>/delete_node/<node_uuid>', methods=['POST'])
+    def delete_node(world_uuid, node_uuid):
+        world = World.from_database(driver, uuid=world_uuid)
+        node = NODE.from_database(driver, uuid=node_uuid)
         
-        flash(f"Timeline '{timeline_name}' created successfully!")
-        return redirect(url_for('enter_world', world_uuid=world_uuid))
-
-    return render_template('create_timeline.html')
-
-@app.route('/create_node/<uuid:world_uuid>/<uuid:timeline_uuid>', methods=['GET', 'POST'])
-@login_required
-def create_node(world_uuid, timeline_uuid):
-    if request.method == 'POST':
-        node_name = request.form['node_name']
-        node_type = request.form['node_type']
-        node_description = request.form['node_description']
-        node_uuid = str(uuid.uuid4())  # Generate a unique identifier for the node
-
+        # First, delete all relationships related to the node
         with driver.session() as session:
-            session.run(
-                """
-                MATCH (w:World {uuid: $world_uuid})-[:HAS_TIMELINE]->(t:WorldTimeline {uuid: $timeline_uuid})
-                CREATE (n:WorldNode {name: $node_name, type: $node_type, description: $node_description, uuid: $node_uuid})
-                CREATE (t)-[:CONTAINS_NODE]->(n)
-                """,
-                world_uuid=str(world_uuid),
-                timeline_uuid=str(timeline_uuid),
-                node_name=node_name,
-                node_type=node_type,
-                node_description=node_description,
-                node_uuid=node_uuid
-            )
+            session.run("MATCH (n {uuid: $uuid})-[r]-() DELETE r", uuid=node_uuid)
         
-        flash(f"World Node '{node_name}' created successfully!")
-        return redirect(url_for('enter_world', world_uuid=world_uuid))
-
-    return render_template('create_node.html', world_uuid=world_uuid, timeline_uuid=timeline_uuid)
-
-
-@app.route('/edit_node/<uuid:world_uuid>/<uuid:node_uuid>', methods=['GET', 'POST'])
-@login_required
-def edit_node(world_uuid, node_uuid):
-    world_uuid_str = str(world_uuid)
-    node_uuid_str = str(node_uuid)
-    selected_timeline_uuid_str = flask_session.get('selected_timeline')
-
-    if request.method == 'POST':
-        node_name = request.form.get('node_name')
-        node_type = request.form.get('node_type')
-        node_description = request.form.get('node_description')
-
+        # Then, delete the node itself
         with driver.session() as session:
-            session.run(
-                """
-                MATCH (n:WorldNode {uuid: $node_uuid})
-                SET n.name = $node_name, n.type = $node_type, n.description = $node_description
-                """,
-                node_uuid=node_uuid_str,
-                node_name=node_name,
-                node_type=node_type,
-                node_description=node_description
-            )
+            session.run("MATCH (n {uuid: $uuid}) DELETE n", uuid=node_uuid)
 
-        # Process relationships
-        relationships = request.form.to_dict(flat=False)
-        print(f"Relationships submitted: {relationships}")  # Debugging output
+        flash(f'Node {node.properties["name"]} has been deleted.', 'success')
+        return redirect(url_for('app_routes.enter_world', world_uuid=world_uuid))
 
-        for i in range(len(relationships.get('relationships[0][target_node_uuid]', []))):
-            target_node_uuid = relationships[f'relationships[{i}][target_node_uuid]'][0]
-            relationship_type = relationships[f'relationships[{i}][type]'][0]
-            relationship_params = relationships[f'relationships[{i}][params]'][0]
 
-            if target_node_uuid and relationship_type:
-                try:
-                    with driver.session() as session:
-                        # Dynamically construct the Cypher query with the relationship type
-                        query = f"""
-                            MATCH (n1:WorldNode {{uuid: $node_uuid}}), (n2:WorldNode {{uuid: $target_node_uuid}})
-                            MERGE (n1)-[r:{relationship_type}]->(n2)
-                        """
-                        # If there are any parameters, add them
-                        if relationship_params:
-                            query += " SET r += $relationship_params"
+    @app_routes.route('/world/<world_uuid>/edit', methods=['GET'])
+    def edit_world(world_uuid):
+        world = World.from_database(driver, uuid=world_uuid)
+        nodes = world.get_nodes(driver)
+        
+        # Convert nodes and relationships into the format required by the frontend
+        graph_data = []
+        for node in nodes:
+            graph_data.append({
+                'id': node['properties']['uuid'],  # Extract 'uuid' from node's properties
+                'label': node['labels'][0],  # Assuming the first label is the main one
+                'name': node['properties']['name']
+            })
 
-                        session.run(
-                            query,
-                            node_uuid=node_uuid_str,
-                            target_node_uuid=str(target_node_uuid),
-                            relationship_params=relationship_params
-                        )
-                    print("Relationship created/updated successfully.")  # Debugging output
-                except Exception as e:
-                    print(f"Error creating/updating relationship: {e}")  # Debugging output
+        return render_template('edit_world.html', world=world, graph_data=graph_data)
 
-        flash('Node and relationships updated successfully!')
-        return redirect(url_for('enter_world', world_uuid=world_uuid_str))
-
-    # On GET request, fetch node details and existing relationships
-    with driver.session() as session:
-        node_result = session.run(
-            "MATCH (n:WorldNode {uuid: $node_uuid}) RETURN n",
-            node_uuid=node_uuid_str
-        )
-        node = node_result.single()['n']
-
-        relationships_result = session.run(
-            "MATCH (n:WorldNode {uuid: $node_uuid})-[r]->(m) RETURN r, m",
-            node_uuid=node_uuid_str
-        )
-        relationships = [
-            {"relationship": record["r"], "target_node": record["m"]}
-            for record in relationships_result
-        ]
-
-        # Fetch all nodes in the selected timeline except the current node
-        all_nodes_result = session.run(
-            """
-            MATCH (t:WorldTimeline {uuid: $timeline_uuid})-[:CONTAINS_NODE]->(n:WorldNode)
-            WHERE n.uuid <> $node_uuid
-            RETURN n
-            """,
-            timeline_uuid=selected_timeline_uuid_str,
-            node_uuid=node_uuid_str
-        )
-        all_nodes = [record["n"] for record in all_nodes_result]
-
-    return render_template(
-        'edit_node.html',
-        node=node,
-        relationships=relationships,
-        all_nodes=all_nodes,
-        world_uuid=world_uuid_str
-    )
+    return app_routes

@@ -1,25 +1,24 @@
+<!-- dashboard.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
-    <h1>Welcome, {{ current_user.username }}!</h1>
-
-    <h2>Your Worlds</h2>
-    <ul>
-        <!-- This will list all worlds the user has created -->
-        {% for world in worlds %}
-            <li>{{ world['name'] }}: {{ world['description'] }}
-                <a href="{{ url_for('enter_world', world_uuid=world['uuid']) }}">Enter World</a>
-            </li>
-        {% endfor %}
-    </ul>
-
-    <a href="{{ url_for('create_world') }}">Create a New World</a><br>
-
-    <a href="{{ url_for('logout') }}">Logout</a>
+    <div class="container mt-5">
+        <h2>Your Worlds</h2>
+        <ul class="list-group">
+            {% for world in worlds %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    {{ world['name'] }}
+                    <a href="{{ url_for('app_routes.enter_world', world_uuid=world['uuid']) }}" class="btn btn-primary">Enter World</a>
+                </li>
+            {% endfor %}
+        </ul>
+        <a href="{{ url_for('app_routes.create_world') }}" class="btn btn-success mt-3">Create New World</a>
+    </div>
 </body>
 </html>
