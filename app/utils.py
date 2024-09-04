@@ -41,19 +41,21 @@ class NODE:
     def create_or_update(self, driver):
         with driver.session() as session:
             if self.uuid:
-                # Update existing node
+                # Existing node: update properties
                 query = f"""
-                    MATCH (n:{self.label} {{uuid: $uuid}})
+                    MATCH (n {{uuid: $uuid}})
                     SET n += $properties
+                    RETURN n
                 """
                 session.run(query, uuid=self.uuid, properties=self.properties)
             else:
-                # Create new node
-                self.uuid = str(uuid.uuid4())
+                # New node: create with properties
                 query = f"""
-                    CREATE (n:{self.label} {{uuid: $uuid}})
-                    SET n += $properties
+                    CREATE (n:{self.label} $properties)
+                    SET n.uuid = $uuid
+                    RETURN n
                 """
+                self.uuid = str(uuid.uuid4())
                 session.run(query, uuid=self.uuid, properties=self.properties)
 
     def find_relationships(self, driver, relationship_type=None, unique_nodes=False, direction=True):

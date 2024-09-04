@@ -3,56 +3,246 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit World</title>
-    <script src="https://d3js.org/d3.v7.min.js"></script> <!-- or use Cytoscape.js -->
+    <title>Edit World - {{ world.properties['name'] }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        #graph {
+        #world-graph {
             width: 100%;
-            height: 600px;
-            border: 1px solid #ccc;
+            height: 500px;
+            border: 1px solid lightgray;
         }
     </style>
 </head>
 <body>
     <div class="container mt-5">
         <h2>Edit World - {{ world.properties['name'] }}</h2>
-        <div id="graph"></div>
-        <button id="save-btn" class="btn btn-success mt-3">Save Changes</button>
+        <div id="world-graph"></div>
+        <button class="btn btn-success mt-3" id="save-changes">Save Changes</button>
+    </div>
+
+    <!-- Node Edit Modal -->
+    <div class="modal" tabindex="-1" id="editNodeModal">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Node</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editNodeForm">
+                        <input type="hidden" id="edit-node-id" name="node_id">
+                        <div class="mb-3">
+                            <label for="edit-node-name" class="form-label">Node Name</label>
+                            <input type="text" class="form-control" id="edit-node-name" name="node_name">
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-node-properties" class="form-label">Properties</label>
+                            <div id="edit-property-fields">
+                                <!-- Existing properties will be added here dynamically -->
+                            </div>
+                            <button type="button" class="btn btn-secondary mt-2" id="add-property-field">Add Property</button>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="save-node">Save Node</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Relationship Modal -->
+    <div class="modal" tabindex="-1" id="createRelationshipModal">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Relationship</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createRelationshipForm">
+                        <input type="hidden" id="rel-node1" name="node1">
+                        <input type="hidden" id="rel-node2" name="node2">
+                        <div class="mb-3">
+                            <label for="rel-type" class="form-label">Relationship Type</label>
+                            <input type="text" class="form-control" id="rel-type" name="rel_type">
+                        </div>
+                        <div class="mb-3">
+                            <label for="rel-properties" class="form-label">Relationship Properties</label>
+                            <textarea class="form-control" id="rel-properties" name="rel_properties"></textarea>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="save-relationship">Save Relationship</button>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
-        const graphData = {{ graph_data|tojson }};
-        // Render the graph here using D3.js or Cytoscape.js
-        // Add event listeners for click, drag, etc.
+        const nodes = new vis.DataSet({{ graph_data['nodes']|tojson }});
+        const edges = new vis.DataSet({{ graph_data['edges']|tojson }});
+    
+        console.log("Nodes:", nodes.get());
+        console.log("Edges:", edges.get());
+    
+        const container = document.getElementById('world-graph');
+        const data = { nodes: nodes, edges: edges };
+    
+        const options = {
+            nodes: {
+                font: { size: 18 },
+                shape: 'dot',
+                size: 30,
+                color: { background: '#FFDDC1', border: '#FF5733' }
+            },
+            edges: {
+                font: { align: 'middle' },
+                arrows: { to: { enabled: true } },
+                color: { color: '#848484' }
+            },
+            physics: {
+                enabled: true,
+                barnesHut: { gravitationalConstant: -3000 }
+            }
+        };
+    
+        const network = new vis.Network(container, data, options);
+        let selectedNode1 = null;
+        let lastClickedTime = 0;
+    
+        // Handle single-click for selecting nodes for relationships
+        network.on('click', function(params) {
+            const currentTime = new Date().getTime();
+            const timeSinceLastClick = currentTime - lastClickedTime;
+    
+            // Check if this is a single-click (time since last click is greater than threshold)
+            if (params.nodes.length > 0 && timeSinceLastClick > 300) {  // Prevents overlap with double-click
+                if (!selectedNode1) {
+                    selectedNode1 = params.nodes[0];  // First node selected
+                    console.log("First node selected:", selectedNode1);
+                } else {
+                    const node2 = params.nodes[0];    // Second node selected
+                    if (selectedNode1 !== node2) {
+                        // Open relationship creation modal
+                        document.getElementById('rel-node1').value = selectedNode1;
+                        document.getElementById('rel-node2').value = node2;
+                        const relModal = new bootstrap.Modal(document.getElementById('createRelationshipModal'));
+                        relModal.show();
+                        selectedNode1 = null;  // Reset the selection after creating the relationship
+                    }
+                }
+            }
+    
+            lastClickedTime = currentTime;  // Update last clicked time
+        });
+    
+        // Handle double-click for editing nodes
+        network.on('doubleClick', function(params) {
+            if (params.nodes.length > 0) {
+                const nodeId = params.nodes[0];
+                const nodeData = nodes.get(nodeId);
+                console.log("Node double-clicked:", nodeData);
+    
+                // Open the edit modal with node data
+                document.getElementById('edit-node-id').value = nodeData.id;
+                document.getElementById('edit-node-name').value = nodeData.label;
+                loadProperties(nodeData.properties);
+    
+                const editModal = new bootstrap.Modal(document.getElementById('editNodeModal'));
+                editModal.show();
+            }
+        });
+    
+        // Load node properties into the edit modal
+        function loadProperties(properties) {
+            const propertyFields = document.getElementById('edit-property-fields');
+            propertyFields.innerHTML = '';  // Clear existing fields
 
-        // Example: Initial rendering (will require more detailed implementation)
-        const svg = d3.select("#graph").append("svg")
-            .attr("width", "100%")
-            .attr("height", "100%");
+            if (!properties) {
+                properties = {};  // Ensure properties is at least an empty object
+            }
 
-        const nodes = svg.selectAll("circle")
-            .data(graphData)
-            .enter().append("circle")
-            .attr("cx", (d, i) => i * 100 + 50)
-            .attr("cy", 100)
-            .attr("r", 20)
-            .attr("fill", "steelblue");
+            for (const [key, value] of Object.entries(properties)) {
+                addPropertyField(key, value);
+            }
+        }
+    
+        // Add a new property field dynamically
+        function addPropertyField(propName = '', propValue = '') {
+            const propertyFields = document.getElementById('edit-property-fields');
+            const newField = document.createElement('div');
+            newField.className = 'property-field mb-2';
+            newField.innerHTML = `
+                <input type="text" class="form-control mb-1" name="property_name[]" value="${propName}" placeholder="Property Name">
+                <input type="text" class="form-control" name="property_value[]" value="${propValue}" placeholder="Property Value">
+            `;
+            propertyFields.appendChild(newField);
+        }
+    
+        // Save the edited node
+        document.getElementById('save-node').addEventListener('click', function() {
+        const nodeId = document.getElementById('edit-node-id').value;
+        const nodeName = document.getElementById('edit-node-name').value;
 
-        const labels = svg.selectAll("text")
-            .data(graphData)
-            .enter().append("text")
-            .attr("x", (d, i) => i * 100 + 50)
-            .attr("y", 105)
-            .attr("text-anchor", "middle")
-            .attr("fill", "white")
-            .text(d => d.name);
+        const propertyNames = document.querySelectorAll('input[name="property_name[]"]');
+        const propertyValues = document.querySelectorAll('input[name="property_value[]"]');
+        const nodeProperties = {};
 
-        nodes.on("click", function(event, d) {
-            // Show edit form for the node
+        propertyNames.forEach((input, index) => {
+            const propName = input.value;
+            const propValue = propertyValues[index].value;
+            if (propName && propValue) {
+                nodeProperties[propName] = propValue;
+            }
         });
 
-        // Other interactions: dragging nodes, creating links, deleting, etc.
+        // Update the node data
+        nodes.update({ id: nodeId, label: nodeName, properties: nodeProperties });
+
+        // Send update request to the backend
+        fetch(`/world/{{ world.uuid }}/update_node`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ node_id: nodeId, node_name: nodeName, node_properties: nodeProperties })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                console.log('Node updated successfully.');
+            } else {
+                console.error('Error:', data.error);
+            }
+        })
+        .catch(error => console.error('Error:', error));
+    });
+    
+        // Save the created relationship
+        document.getElementById('save-relationship').addEventListener('click', function() {
+            const node1 = document.getElementById('rel-node1').value;
+            const node2 = document.getElementById('rel-node2').value;
+            const relType = document.getElementById('rel-type').value;
+            const relProperties = JSON.parse(document.getElementById('rel-properties').value || "{}");
+    
+            // Create the new relationship in the network graph
+            const newEdge = { from: node1, to: node2, label: relType, properties: relProperties };
+            edges.add(newEdge);
+    
+            // Send relationship creation request to the backend
+            fetch(`/world/{{ world.uuid }}/create_relationship`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ node1: node1, node2: node2, rel_type: relType, rel_properties: relProperties })
+            });
+    
+            // Close the modal
+            const relModal = bootstrap.Modal.getInstance(document.getElementById('createRelationshipModal'));
+            relModal.hide();
+        });
+    
+        // Add property fields dynamically in the edit modal
+        document.getElementById('add-property-field').addEventListener('click', function() {
+            addPropertyField();
+        });
     </script>
 </body>
 </html>

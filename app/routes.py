@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, redirect, url_for, session, flash
+from flask import Blueprint, render_template, request, redirect, url_for, session, flash, jsonify
 from app.utils import User, World, NODE
 import os
 
@@ -145,17 +145,89 @@ def create_app_routes(driver):
     @app_routes.route('/world/<world_uuid>/edit', methods=['GET'])
     def edit_world(world_uuid):
         world = World.from_database(driver, uuid=world_uuid)
-        nodes = world.get_nodes(driver)
-        
-        # Convert nodes and relationships into the format required by the frontend
-        graph_data = []
+        nodes = world.get_nodes(driver)  # Fetching nodes
+
+        graph_data = {
+            'nodes': [],
+            'edges': []
+        }
+
+        # Populate nodes
         for node in nodes:
-            graph_data.append({
-                'id': node['properties']['uuid'],  # Extract 'uuid' from node's properties
-                'label': node['labels'][0],  # Assuming the first label is the main one
-                'name': node['properties']['name']
-            })
+            node_properties = node.get('properties', {})
+            node_id = node_properties.get('uuid', 'undefined_uuid')
+            node_name = node_properties.get('name', 'Unnamed Node')
+            node_labels = node.get('labels', ['Unknown'])
+
+            if node_id != 'undefined_uuid':
+                graph_data['nodes'].append({
+                    'id': node_id,
+                    'label': node_name,
+                    'group': node_labels[0] if node_labels else 'Unknown'
+                })
+
+        # Retrieve relationships (edges)
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (n)-[r]->(m)
+                WHERE n.uuid IN $node_ids AND m.uuid IN $node_ids
+                RETURN n.uuid AS from, m.uuid AS to, TYPE(r) AS rel_type
+            """, node_ids=[node['properties']['uuid'] for node in nodes])
+
+            for record in result:
+                graph_data['edges'].append({
+                    'from': record['from'],
+                    'to': record['to'],
+                    'label': record['rel_type']
+                })
+
+        # Debugging: Print to verify if data is correct
+        print(f"Graph Data Nodes: {graph_data['nodes']}")
+        print(f"Graph Data Edges: {graph_data['edges']}")
 
         return render_template('edit_world.html', world=world, graph_data=graph_data)
 
+    @app_routes.route('/world/<world_uuid>/update_node', methods=['POST'])
+    def update_node(world_uuid):
+        data = request.get_json()
+
+        print("Data received:", data)  # Debug print
+
+        if 'node_id' not in data:
+            return jsonify({'error': 'Missing node_id'}), 400
+
+        try:
+            node = NODE.from_database(driver, uuid=data['node_id'])
+            print(f"Node found: {node}")
+
+            # Update node properties
+            node.properties['name'] = data['node_name']
+            node.properties.update(data['node_properties'])
+            print("Updated properties:", node.properties)
+
+            # Save the changes to the database
+            node.create_or_update(driver)
+            print("Node updated successfully")
+
+            return jsonify({'status': 'success'}), 200
+        except Exception as e:
+            print(f"Error updating node: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app_routes.route('/world/<world_uuid>/create_relationship', methods=['POST'])
+    def create_relationship(world_uuid):
+        data = request.get_json()
+
+        node1 = NODE.from_database(driver, uuid=data['node1'])
+        node2 = NODE.from_database(driver, uuid=data['node2'])
+
+        # Create relationship
+        node1.create_or_update_relationship(driver, target_node_uuid=node2.uuid,
+                                            relationship_type=data['rel_type'],
+                                            properties=data['rel_properties'],
+                                            direction=False)
+        return jsonify({'status': 'success'}), 200
+
     return app_routes
+
+
