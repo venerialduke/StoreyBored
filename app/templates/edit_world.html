@@ -20,6 +20,7 @@
         <h2>Edit World - {{ world.properties['name'] }}</h2>
         <div id="world-graph"></div>
         <button class="btn btn-success mt-3" id="save-changes">Save Changes</button>
+        <button class="btn btn-primary mt-3" id="create-new-node" data-bs-toggle="modal" data-bs-target="#createNodeModal">Create New Node (Modal)</button>
     </div>
 
     <!-- Node Edit Modal -->
@@ -39,12 +40,11 @@
                         </div>
                         <div class="mb-3">
                             <label for="edit-node-properties" class="form-label">Properties</label>
-                            <div id="edit-property-fields">
-                                <!-- Existing properties will be added here dynamically -->
-                            </div>
+                            <div id="edit-property-fields"></div>
                             <button type="button" class="btn btn-secondary mt-2" id="add-property-field">Add Property</button>
                         </div>
                         <button type="button" class="btn btn-primary" id="save-node">Save Node</button>
+                        <button type="button" class="btn btn-danger" id="delete-node">Delete Node</button>
                     </form>
                 </div>
             </div>
@@ -64,8 +64,23 @@
                         <input type="hidden" id="rel-node1" name="node1">
                         <input type="hidden" id="rel-node2" name="node2">
                         <div class="mb-3">
+                            <label for="rel-node1-name" class="form-label">Node 1:</label>
+                            <input type="text" class="form-control" id="rel-node1-name" disabled>
+                        </div>
+                        <div class="mb-3">
+                            <label for="rel-node2-name" class="form-label">Node 2:</label>
+                            <input type="text" class="form-control" id="rel-node2-name" disabled>
+                        </div>
+                        <div class="mb-3">
                             <label for="rel-type" class="form-label">Relationship Type</label>
                             <input type="text" class="form-control" id="rel-type" name="rel_type">
+                        </div>
+                        <div class="mb-3">
+                            <label for="directed" class="form-label">Directed Relationship?</label>
+                            <select class="form-select" id="directed">
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                            </select>
                         </div>
                         <div class="mb-3">
                             <label for="rel-properties" class="form-label">Relationship Properties</label>
@@ -78,16 +93,57 @@
         </div>
     </div>
 
+    <!-- Create Node Modal -->
+    <div class="modal" tabindex="-1" id="createNodeModal">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Node</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createNodeForm">
+                        <div class="mb-3">
+                            <label for="node_name" class="form-label">Node Name</label>
+                            <input type="text" class="form-control" id="node_name" name="node_name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="node_type" class="form-label">Node Type</label>
+                            <select class="form-select" id="node_type" name="node_type" onchange="toggleCustomTypeField()">
+                                <option value="Location">Location</option>
+                                <option value="Character">Character</option>
+                                <option value="Faction">Faction</option>
+                                <option value="custom">Custom Type</option>
+                            </select>
+                        </div>
+                        <div class="mb-3" id="custom_type_field" style="display:none;">
+                            <label for="custom_type" class="form-label">Custom Type</label>
+                            <input type="text" class="form-control" id="custom_type" name="custom_type">
+                        </div>
+                        <div class="mb-3">
+                            <label for="properties" class="form-label">Additional Properties</label>
+                            <div id="property-fields">
+                                <div class="property-field mb-2">
+                                    <input type="text" class="form-control mb-1" name="property_name[]" placeholder="Property Name">
+                                    <input type="text" class="form-control" name="property_value[]" placeholder="Property Value">
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-secondary mt-2" onclick="addPropertyField()">Add Property</button>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Create Node</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        // vis.js setup
         const nodes = new vis.DataSet({{ graph_data['nodes']|tojson }});
         const edges = new vis.DataSet({{ graph_data['edges']|tojson }});
-    
-        console.log("Nodes:", nodes.get());
-        console.log("Edges:", edges.get());
-    
         const container = document.getElementById('world-graph');
         const data = { nodes: nodes, edges: edges };
-    
+
         const options = {
             nodes: {
                 font: { size: 18 },
@@ -105,68 +161,63 @@
                 barnesHut: { gravitationalConstant: -3000 }
             }
         };
-    
+
         const network = new vis.Network(container, data, options);
         let selectedNode1 = null;
-        let lastClickedTime = 0;
-    
-        // Handle single-click for selecting nodes for relationships
+
+        // Handle click for selecting nodes
         network.on('click', function(params) {
-            const currentTime = new Date().getTime();
-            const timeSinceLastClick = currentTime - lastClickedTime;
-    
-            // Check if this is a single-click (time since last click is greater than threshold)
-            if (params.nodes.length > 0 && timeSinceLastClick > 300) {  // Prevents overlap with double-click
-                if (!selectedNode1) {
-                    selectedNode1 = params.nodes[0];  // First node selected
-                    console.log("First node selected:", selectedNode1);
-                } else {
-                    const node2 = params.nodes[0];    // Second node selected
-                    if (selectedNode1 !== node2) {
-                        // Open relationship creation modal
-                        document.getElementById('rel-node1').value = selectedNode1;
-                        document.getElementById('rel-node2').value = node2;
-                        const relModal = new bootstrap.Modal(document.getElementById('createRelationshipModal'));
-                        relModal.show();
-                        selectedNode1 = null;  // Reset the selection after creating the relationship
-                    }
-                }
-            }
-    
-            lastClickedTime = currentTime;  // Update last clicked time
-        });
-    
-        // Handle double-click for editing nodes
-        network.on('doubleClick', function(params) {
             if (params.nodes.length > 0) {
                 const nodeId = params.nodes[0];
                 const nodeData = nodes.get(nodeId);
-                console.log("Node double-clicked:", nodeData);
-    
-                // Open the edit modal with node data
-                document.getElementById('edit-node-id').value = nodeData.id;
-                document.getElementById('edit-node-name').value = nodeData.label;
-                loadProperties(nodeData.properties);
-    
-                const editModal = new bootstrap.Modal(document.getElementById('editNodeModal'));
-                editModal.show();
+
+                if (!selectedNode1) {
+                    selectedNode1 = nodeId;
+                } else if (selectedNode1 === nodeId && params.event.srcEvent.shiftKey) {
+                    openEditNodeModal(nodeData);
+                    selectedNode1 = null;
+                } else if (selectedNode1 !== nodeId && params.event.srcEvent.shiftKey) {
+                    openCreateRelationshipModal(selectedNode1, nodeId);
+                    selectedNode1 = null;
+                }
             }
         });
-    
-        // Load node properties into the edit modal
+
+        // Open the edit modal for the selected node
+        function openEditNodeModal(nodeData) {
+            document.getElementById('edit-node-id').value = nodeData.id;
+            document.getElementById('edit-node-name').value = nodeData.label;
+            loadProperties(nodeData.properties);
+
+            const editModal = new bootstrap.Modal(document.getElementById('editNodeModal'));
+            editModal.show();
+        }
+
+        // Open the relationship modal for creating a relationship
+        function openCreateRelationshipModal(node1, node2) {
+            document.getElementById('rel-node1').value = node1;
+            document.getElementById('rel-node2').value = node2;
+            document.getElementById('rel-node1-name').value = nodes.get(node1).label;
+            document.getElementById('rel-node2-name').value = nodes.get(node2).label;
+
+            const relModal = new bootstrap.Modal(document.getElementById('createRelationshipModal'));
+            relModal.show();
+        }
+
+        // Load node properties into the modal
         function loadProperties(properties) {
             const propertyFields = document.getElementById('edit-property-fields');
-            propertyFields.innerHTML = '';  // Clear existing fields
+            propertyFields.innerHTML = '';
 
             if (!properties) {
-                properties = {};  // Ensure properties is at least an empty object
+                properties = {};
             }
 
             for (const [key, value] of Object.entries(properties)) {
                 addPropertyField(key, value);
             }
         }
-    
+
         // Add a new property field dynamically
         function addPropertyField(propName = '', propValue = '') {
             const propertyFields = document.getElementById('edit-property-fields');
@@ -178,68 +229,77 @@
             `;
             propertyFields.appendChild(newField);
         }
-    
-        // Save the edited node
+
+        // Save node changes
         document.getElementById('save-node').addEventListener('click', function() {
-        const nodeId = document.getElementById('edit-node-id').value;
-        const nodeName = document.getElementById('edit-node-name').value;
+            const nodeId = document.getElementById('edit-node-id').value;
+            const nodeName = document.getElementById('edit-node-name').value;
 
-        const propertyNames = document.querySelectorAll('input[name="property_name[]"]');
-        const propertyValues = document.querySelectorAll('input[name="property_value[]"]');
-        const nodeProperties = {};
+            const propertyNames = document.querySelectorAll('input[name="property_name[]"]');
+            const propertyValues = document.querySelectorAll('input[name="property_value[]"]');
+            const nodeProperties = {};
 
-        propertyNames.forEach((input, index) => {
-            const propName = input.value;
-            const propValue = propertyValues[index].value;
-            if (propName && propValue) {
-                nodeProperties[propName] = propValue;
-            }
+            propertyNames.forEach((input, index) => {
+                const propName = input.value;
+                const propValue = propertyValues[index].value;
+                if (propName && propValue) {
+                    nodeProperties[propName] = propValue;
+                }
+            });
+
+            nodes.update({ id: nodeId, label: nodeName, properties: nodeProperties });
+
+            fetch(`/world/{{ world.uuid }}/update_node`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ node_id: nodeId, node_name: nodeName, node_properties: nodeProperties })
+            });
+
+            const editModal = bootstrap.Modal.getInstance(document.getElementById('editNodeModal'));
+            editModal.hide();
         });
 
-        // Update the node data
-        nodes.update({ id: nodeId, label: nodeName, properties: nodeProperties });
+        // Delete node
+        document.getElementById('delete-node').addEventListener('click', function() {
+            const nodeId = document.getElementById('edit-node-id').value;
 
-        // Send update request to the backend
-        fetch(`/world/{{ world.uuid }}/update_node`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ node_id: nodeId, node_name: nodeName, node_properties: nodeProperties })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                console.log('Node updated successfully.');
-            } else {
-                console.error('Error:', data.error);
-            }
-        })
-        .catch(error => console.error('Error:', error));
-    });
-    
-        // Save the created relationship
+            nodes.remove(nodeId);
+
+            fetch(`/world/{{ world.uuid }}/delete_node/${nodeId}`, {
+                method: 'POST',
+            });
+
+            const editModal = bootstrap.Modal.getInstance(document.getElementById('editNodeModal'));
+            editModal.hide();
+        });
+
+        // Save relationship
         document.getElementById('save-relationship').addEventListener('click', function() {
             const node1 = document.getElementById('rel-node1').value;
             const node2 = document.getElementById('rel-node2').value;
             const relType = document.getElementById('rel-type').value;
+            const directed = document.getElementById('directed').value === 'yes';
             const relProperties = JSON.parse(document.getElementById('rel-properties').value || "{}");
-    
-            // Create the new relationship in the network graph
-            const newEdge = { from: node1, to: node2, label: relType, properties: relProperties };
-            edges.add(newEdge);
-    
-            // Send relationship creation request to the backend
+
+            edges.add({
+                from: node1,
+                to: node2,
+                label: relType,
+                properties: relProperties,
+                arrows: directed ? 'to' : '',
+            });
+
             fetch(`/world/{{ world.uuid }}/create_relationship`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ node1: node1, node2: node2, rel_type: relType, rel_properties: relProperties })
             });
-    
-            // Close the modal
+
             const relModal = bootstrap.Modal.getInstance(document.getElementById('createRelationshipModal'));
             relModal.hide();
         });
-    
-        // Add property fields dynamically in the edit modal
+
+        // Add a property field in the node edit modal
         document.getElementById('add-property-field').addEventListener('click', function() {
             addPropertyField();
         });

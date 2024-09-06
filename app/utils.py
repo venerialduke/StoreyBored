@@ -23,7 +23,7 @@ class NODE:
                 raise ValueError(f"No node found with UUID {uuid}")
 
             labels = record["labels"]
-            properties = record["n"]
+            properties = dict(record["n"])
 
             if "User" in labels:
                 return User(uuid=uuid, properties=properties)

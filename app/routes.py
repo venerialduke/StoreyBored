@@ -191,21 +191,21 @@ def create_app_routes(driver):
     def update_node(world_uuid):
         data = request.get_json()
 
-        print("Data received:", data)  # Debug print
-
-        if 'node_id' not in data:
-            return jsonify({'error': 'Missing node_id'}), 400
-
         try:
+            # Fetch the node from the database
             node = NODE.from_database(driver, uuid=data['node_id'])
             print(f"Node found: {node}")
 
-            # Update node properties
+            # Ensure node.properties is a dictionary
+            if node.properties is None:
+                node.properties = {}
+
+            # Update node properties (name and any additional properties)
             node.properties['name'] = data['node_name']
             node.properties.update(data['node_properties'])
             print("Updated properties:", node.properties)
 
-            # Save the changes to the database
+            # Save the updated node to the database
             node.create_or_update(driver)
             print("Node updated successfully")
 
@@ -227,6 +227,28 @@ def create_app_routes(driver):
                                             properties=data['rel_properties'],
                                             direction=False)
         return jsonify({'status': 'success'}), 200
+
+    @app_routes.route('/world/<world_uuid>/create_node_modal', methods=['POST'])
+    def create_node_modal(world_uuid):
+        world = World.from_database(driver, uuid=world_uuid)
+
+        data = request.get_json()  # Get data from AJAX request
+
+        # Get the node type (label) and name
+        label = data.get('node_type')
+        name = data.get('node_name')
+
+        # Basic properties
+        node_properties = {'name': name}
+
+        # Add additional properties
+        for key, value in data.get('properties', {}).items():
+            node_properties[key] = value
+
+        # Create or update the node
+        new_node = world.create_or_update_node(driver, node_label=label, node_properties=node_properties)
+        
+        return jsonify({'status': 'success', 'node_id': new_node.uuid}), 200
 
     return app_routes
 
