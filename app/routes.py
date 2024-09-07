@@ -250,6 +250,40 @@ def create_app_routes(driver):
         
         return jsonify({'status': 'success', 'node_id': new_node.uuid}), 200
 
+    @app_routes.route('/world/<world_uuid>/update_relationship', methods=['POST'])
+    def update_relationship(world_uuid):
+        data = request.get_json()
+        rel_id = data['rel_id']
+        rel_type = data['rel_type']
+        rel_properties = data.get('rel_properties', {})
+
+        # Update relationship logic in the database
+        try:
+            with driver.session() as session:
+                query = """
+                MATCH ()-[r]->()
+                WHERE id(r) = $rel_id
+                SET r += $rel_properties
+                SET r.type = $rel_type
+                RETURN r
+                """
+                session.run(query, rel_id=rel_id, rel_properties=rel_properties, rel_type=rel_type)
+            return jsonify({'status': 'success'}), 200
+        except Exception as e:
+            return jsonify({'status': 'error', 'error': str(e)}), 500
+
+    @app_routes.route('/world/<world_uuid>/delete_relationship/<rel_id>', methods=['POST'])
+    def delete_relationship(world_uuid, rel_id):
+        try:
+            with driver.session() as session:
+                query = """
+                MATCH ()-[r]->()
+                WHERE id(r) = $rel_id
+                DELETE r
+                """
+                session.run(query, rel_id=int(rel_id))
+            return jsonify({'status': 'success'}), 200
+        except Exception as e:
+            return jsonify({'status': 'error', 'error': str(e)}), 500
+
     return app_routes
-
-

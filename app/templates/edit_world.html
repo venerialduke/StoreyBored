@@ -93,6 +93,34 @@
         </div>
     </div>
 
+    <!-- Edit Relationship Modal -->
+    <div class="modal" tabindex="-1" id="editRelationshipModal">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Relationship</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editRelationshipForm">
+                        <input type="hidden" id="edit-rel-id" name="rel_id">
+                        <div class="mb-3">
+                            <label for="edit-rel-type" class="form-label">Relationship Type</label>
+                            <input type="text" class="form-control" id="edit-rel-type" name="rel_type">
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-rel-properties" class="form-label">Properties</label>
+                            <div id="edit-rel-property-fields"></div>
+                            <button type="button" class="btn btn-secondary mt-2" id="add-rel-property-field">Add Property</button>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="save-relationship">Save Relationship</button>
+                        <button type="button" class="btn btn-danger" id="delete-relationship">Delete Relationship</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Create Node Modal -->
     <div class="modal" tabindex="-1" id="createNodeModal">
         <div class="modal-dialog">
@@ -180,6 +208,10 @@
                     openCreateRelationshipModal(selectedNode1, nodeId);
                     selectedNode1 = null;
                 }
+            } else if (params.edges.length > 0) {
+                const edgeId = params.edges[0];
+                const edgeData = edges.get(edgeId);
+                openEditRelationshipModal(edgeData);
             }
         });
 
@@ -303,6 +335,155 @@
         document.getElementById('add-property-field').addEventListener('click', function() {
             addPropertyField();
         });
+
+        // Handle Create Node form submission
+        document.getElementById('createNodeForm').addEventListener('submit', function(event) {
+            event.preventDefault();  // Prevent the default form submission
+            const nodeName = document.getElementById('node_name').value;
+            const nodeType = document.getElementById('node_type').value;
+            const customType = document.getElementById('custom_type').value;
+            const properties = {};
+
+            // Gather all property fields
+            document.querySelectorAll('.property-field').forEach(function(field) {
+                const propName = field.querySelector('input[name="property_name[]"]').value;
+                const propValue = field.querySelector('input[name="property_value[]"]').value;
+                if (propName && propValue) {
+                    properties[propName] = propValue;
+                }
+            });
+
+            const nodeData = {
+                node_name: nodeName,
+                node_type: nodeType === 'custom' ? customType : nodeType,
+                properties: properties
+            };
+
+            // Send the data to the Flask backend via fetch
+            fetch(`/world/{{ world.uuid }}/create_node_modal`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(nodeData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Node was created successfully, refresh the graph
+                    nodes.add({
+                        id: data.node_id,
+                        label: nodeName,
+                        group: nodeType
+                    });
+                    const createModal = bootstrap.Modal.getInstance(document.getElementById('createNodeModal'));
+                    createModal.hide();  // Close the modal
+                } else {
+                    alert('Error creating node: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error creating node.');
+            });
+        });
+
+        // Toggle custom type field in the Create Node modal
+        function toggleCustomTypeField() {
+            const nodeType = document.getElementById('node_type').value;
+            const customTypeField = document.getElementById('custom_type_field');
+
+            if (nodeType === 'custom') {
+                customTypeField.style.display = 'block';
+            } else {
+                customTypeField.style.display = 'none';
+            }
+        }
+
+        // Initialize the custom type field based on the dropdown value
+        document.addEventListener('DOMContentLoaded', function() {
+            toggleCustomTypeField();
+        });
+
+        // Open the edit modal for the selected relationship
+        function openEditRelationshipModal(edgeData) {
+            document.getElementById('edit-rel-id').value = edgeData.id;
+            document.getElementById('edit-rel-type').value = edgeData.label;
+            loadRelationshipProperties(edgeData.properties);
+
+            const editModal = new bootstrap.Modal(document.getElementById('editRelationshipModal'));
+            editModal.show();
+        }
+
+        // Load relationship properties into the modal
+        function loadRelationshipProperties(properties) {
+            const propertyFields = document.getElementById('edit-rel-property-fields');
+            propertyFields.innerHTML = '';
+
+            if (!properties) {
+                properties = {};
+            }
+
+            for (const [key, value] of Object.entries(properties)) {
+                addRelationshipPropertyField(key, value);
+            }
+        }
+
+        // Add a new property field for relationship properties dynamically
+        function addRelationshipPropertyField(propName = '', propValue = '') {
+            const propertyFields = document.getElementById('edit-rel-property-fields');
+            const newField = document.createElement('div');
+            newField.className = 'property-field mb-2';
+            newField.innerHTML = `
+                <input type="text" class="form-control mb-1" name="rel_property_name[]" value="${propName}" placeholder="Property Name">
+                <input type="text" class="form-control" name="rel_property_value[]" value="${propValue}" placeholder="Property Value">
+            `;
+            propertyFields.appendChild(newField);
+        }
+
+        // Save relationship changes
+        document.getElementById('save-relationship').addEventListener('click', function() {
+            const relId = document.getElementById('edit-rel-id').value;
+            const relType = document.getElementById('edit-rel-type').value;
+
+            const propertyNames = document.querySelectorAll('input[name="rel_property_name[]"]');
+            const propertyValues = document.querySelectorAll('input[name="rel_property_value[]"]');
+            const relProperties = {};
+
+            propertyNames.forEach((input, index) => {
+                const propName = input.value;
+                const propValue = propertyValues[index].value;
+                if (propName && propValue) {
+                    relProperties[propName] = propValue;
+                }
+            });
+
+            edges.update({ id: relId, label: relType, properties: relProperties });
+
+            fetch(`/world/{{ world.uuid }}/update_relationship`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rel_id: relId, rel_type: relType, rel_properties: relProperties })
+            });
+
+            const editModal = bootstrap.Modal.getInstance(document.getElementById('editRelationshipModal'));
+            editModal.hide();
+        });
+
+        // Delete relationship
+        document.getElementById('delete-relationship').addEventListener('click', function() {
+            const relId = document.getElementById('edit-rel-id').value;
+
+            edges.remove(relId);
+
+            fetch(`/world/{{ world.uuid }}/delete_relationship/${relId}`, {
+                method: 'POST',
+            });
+
+            const editModal = bootstrap.Modal.getInstance(document.getElementById('editRelationshipModal'));
+            editModal.hide();
+        });
+
     </script>
 </body>
 </html>
